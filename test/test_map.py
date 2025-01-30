@@ -156,3 +156,5 @@ def test_analyse_mapping(correct_project_dir, correct_k, test_project_mutation_d
     mutation_dict = mapper.analyze_mapping()
     print(mutation_dict)
     assert mutation_dict == test_project_mutation_dict
+
+
