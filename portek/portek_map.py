@@ -425,19 +425,23 @@ class RefFreePipeline:
             files_counter = 1
             tot_files = len(self.sample_groups)
         group_distros = {}
+        group_avg_pos = {}
         for filename in in_path:
             with open(filename, mode="rb") as in_file:
                 group = filename.stem.split("_")[1]
                 temp_dict = pickle.load(in_file)
                 temp_dict = {portek.decode_kmer(id, self.k):positions for id, positions in temp_dict.items()}
-                group_distros[group] = {}
-                for kmer_group in self.matrices["enriched"]["group"].unique():
-                    kmers = self.matrices["enriched"][self.matrices["enriched"]["group"] == kmer_group].index
-                    filtered_dict = {kmer:Counter(positions) for kmer, positions in temp_dict.items() if kmer in kmers}
-                    ratio_dict = {}
-                    for kmer, counter in filtered_dict.items():
-                        ratio_dict[kmer] = {position:count/len(self.sample_group_dict[group]) for position,count in counter.items()}
-                    group_distros[group][kmer_group] = ratio_dict
+                # group_distros[group] = {}
+                kmers = self.matrices["enriched"].index
+                filtered_dict = {kmer:Counter(positions) for kmer, positions in temp_dict.items() if kmer in kmers}
+                ratio_dict = {}
+                avg_pos_dict = {}
+                for kmer, counter in filtered_dict.items():
+                    ratio_dict[kmer] = {position:count/len(self.sample_group_dict[group]) for position,count in counter.items()}
+                    avg_pos_dict[kmer] = sum([pos*ratio for pos,ratio in ratio_dict[kmer].items()])/sum(ratio_dict[kmer].values())
+                group_distros[group] = ratio_dict
+                group_avg_pos[group] = avg_pos_dict
+
             if verbose == True:
                 print(
                     f"Loaded {self.k}-mer distributions from {files_counter} of {tot_files} groups.",
@@ -446,9 +450,11 @@ class RefFreePipeline:
                 )
                 files_counter += 1
         self.group_distros = group_distros
+        self.group_avg_pos = group_avg_pos
 
     
     def save_group_distros(self, verbose:bool = False):
-        group_distros_df = pd.DataFrame(self.group_distros)
-        group_distros_df.to_csv(f"{self.project_dir}/temp/group_distros.csv")
+        group_avg_pos_df = pd.DataFrame(self.group_avg_pos)
+        group_avg_pos_df["group"] = self.matrices["enriched"]["group"]
+        group_avg_pos_df.to_csv(f"{self.project_dir}/temp/group_avg_pos.csv")
 
