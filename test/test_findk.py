@@ -2,40 +2,42 @@ import pytest
 import portek
 from unittest import mock
 
-def test_KmerFinder_correct_dir(correct_project_dir, default_max_k):
-    test_kmer_finder = portek.KmerFinder(correct_project_dir, default_max_k)
+def test_KmerFinder_correct_dir(correct_project_dir, default_min_k, default_max_k):
+    test_kmer_finder = portek.KmerFinder(correct_project_dir, default_min_k, default_max_k)
     assert test_kmer_finder.project_dir == "test/testproject/"
     assert test_kmer_finder.maxk == 31
+    assert test_kmer_finder.mink == 5
 
 
-def test_KmerFinder_no_dir(no_project_dir, default_max_k):
+def test_KmerFinder_no_dir(no_project_dir, default_min_k, default_max_k):
     with pytest.raises(NotADirectoryError):
-        test_kmer_finder = portek.KmerFinder(no_project_dir, default_max_k)
+        test_kmer_finder = portek.KmerFinder(no_project_dir, default_min_k, default_max_k)
 
 
-def test_KmerFinder_empty_dir(empty_project_dir, default_max_k):
+def test_KmerFinder_empty_dir(empty_project_dir, default_min_k, default_max_k):
     with pytest.raises(FileNotFoundError):
-        test_kmer_finder = portek.KmerFinder(empty_project_dir, default_max_k)
+        test_kmer_finder = portek.KmerFinder(empty_project_dir, default_min_k, default_max_k)
 
 
-def test_KmerFinder_correct_k(correct_project_dir,correct_k):
-    test_kmer_finder = portek.KmerFinder(correct_project_dir, correct_k)
+def test_KmerFinder_correct_k(correct_project_dir,correct_min_k, correct_k):
+    test_kmer_finder = portek.KmerFinder(correct_project_dir, correct_min_k, correct_k)
+    assert test_kmer_finder.mink == 11
     assert test_kmer_finder.maxk == 15
 
 
-def test_KmerFinder_float_k(correct_project_dir,float_k):
+def test_KmerFinder_float_k(correct_project_dir,default_min_k, float_k):
     with pytest.raises(TypeError):
-        test_kmer_finder = portek.KmerFinder(correct_project_dir, float_k)
+        test_kmer_finder = portek.KmerFinder(correct_project_dir, default_min_k, float_k)
 
 
-def test_KmerFinder_small_k(correct_project_dir,small_k):
+def test_KmerFinder_small_k(correct_project_dir,default_min_k, small_k):
     with pytest.raises(TypeError):
-        test_kmer_finder = portek.KmerFinder(correct_project_dir, small_k)
+        test_kmer_finder = portek.KmerFinder(correct_project_dir, default_min_k, small_k)
 
 
-def test_KmerFinder_even_k(correct_project_dir,even_k):
+def test_KmerFinder_even_k(correct_project_dir,default_min_k, even_k):
     with pytest.raises(TypeError):
-        test_kmer_finder = portek.KmerFinder(correct_project_dir, even_k)
+        test_kmer_finder = portek.KmerFinder(correct_project_dir, default_min_k, even_k)
 
 
 correct_config_ava = """
@@ -46,8 +48,8 @@ mode: ava
 goi: 
 """
 @mock.patch("builtins.open", new_callable=mock.mock_open, read_data=correct_config_ava)
-def test_KmerFinder_correct_config_ava(mock_config, correct_project_dir, default_max_k):
-    test_kmer_finder = portek.KmerFinder(correct_project_dir, default_max_k)
+def test_KmerFinder_correct_config_ava(mock_config, correct_project_dir, default_min_k, default_max_k):
+    test_kmer_finder = portek.KmerFinder(correct_project_dir, default_min_k, default_max_k)
     assert test_kmer_finder.project_dir == "test/testproject/"
     assert test_kmer_finder.maxk == 31
     assert test_kmer_finder.sample_groups == ["A", "B", "C"]

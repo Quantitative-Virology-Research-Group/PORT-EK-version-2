@@ -32,11 +32,19 @@ def empty_project_dir():
 def default_max_k():
     return 31
 
+@pytest.fixture
+def default_min_k():
+    return 5
+
 
 @pytest.fixture
 def correct_k():
     return 15
 
+
+@pytest.fixture
+def correct_min_k():
+    return 11
 
 @pytest.fixture
 def float_k():
@@ -186,7 +194,7 @@ def expected_mutations_text():
 @pytest.fixture
 def test_project_mutation_dict():
     expected_dict = {
-        (7, "T", "G"): [
+        "7T>G": [
             "GGTCGCACCTAGAGT",
             "GCCCGCGGTCGCACC",
             "CGCGGTCGCACCTAG",
@@ -195,7 +203,7 @@ def test_project_mutation_dict():
             "CCGCGGTCGCACCTA",
             "CCCGCGGTCGCACCT",
         ],
-        (45, "T", "A"): [
+        "45T>A": [
             "CTCAGAAATTCTGTT",
             "TGCTCAGAAATTCTG",
             "GAAATTCTGTTGGCG",
