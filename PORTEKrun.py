@@ -121,7 +121,7 @@ def main():
         else:
             mapping_pipeline = portek.RefFreePipeline(args.project_dir, args.k)
             mapping_pipeline.get_kmer_pos("enriched", verbose=args.verbose)
-            mapping_pipeline.calc_distribution_stats(verbose=args.verbose)
+            mapping_pipeline.save_group_distros(verbose=args.verbose)
     elif args.tool == "classify":
         pass
 

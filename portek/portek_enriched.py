@@ -52,8 +52,12 @@ class EnrichedKmersPipeline:
             self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
             self.c_cols = [f"{group}_c" for group in self.sample_groups]
             self.f_cols = [f"{group}_f" for group in self.sample_groups]
-        except:
-            raise FileNotFoundError(
+            
+        except FileNotFoundError:
+            raise FileNotFoundError(f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
+            )
+        except ValueError:
+            raise ValueError(
                 f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
             )
 

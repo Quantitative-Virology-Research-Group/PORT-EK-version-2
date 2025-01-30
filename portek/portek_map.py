@@ -62,8 +62,11 @@ class MappingPipeline:
 
             self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
 
-        except:
-            raise FileNotFoundError(
+        except FileNotFoundError:
+            raise FileNotFoundError(f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
+            )
+        except ValueError:
+            raise ValueError(
                 f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
             )
 
@@ -370,8 +373,11 @@ class RefFreePipeline:
                     "Unrecognized analysis mode, should by ava or ovr. Check your config file!"
                 )
 
-        except:
-            raise FileNotFoundError(
+        except FileNotFoundError:
+            raise FileNotFoundError(f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
+            )
+        except ValueError:
+            raise ValueError(
                 f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
             )
 
@@ -441,20 +447,8 @@ class RefFreePipeline:
                 files_counter += 1
         self.group_distros = group_distros
 
-    def calc_distribution_stats(self, verbose:bool=False):
-        bout_bout = Counter()
-        for fractional_counts in self.group_distros["Bout"]["Bout_enriched"].values():
-            bout_bout |= fractional_counts
-        bout_bmain = Counter()
-        for fractional_counts in self.group_distros["Bout"]["Bmain_enriched"].values():
-            bout_bmain |= fractional_counts
-        bout_cons = Counter()
-        for fractional_counts in self.group_distros["Bout"]["conserved"].values():
-            bout_cons |= fractional_counts
+    
+    def save_group_distros(self, verbose:bool = False):
+        group_distros_df = pd.DataFrame(self.group_distros)
+        group_distros_df.to_csv(f"{self.project_dir}/temp/group_distros.csv")
 
-        max_x = max([max(bout_bout.keys()),max(bout_bmain.keys()),max(bout_cons.keys())])
-
-        bout_coverage = pd.DataFrame(0,index=range(0,max_x+1), columns=["bout","bmain","conserved"])
-        bout_df = pd.DataFrame(bout_bout)
-        bout_coverage.update(bout_df)
-        print(bout_coverage)

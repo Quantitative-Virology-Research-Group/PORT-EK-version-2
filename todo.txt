@@ -1,4 +1,3 @@
-fix error handling in config file loading
 classification in one module - portek_classify
 add reference-free mapping
 add enriched/conserved/variable genome regions plots
