@@ -431,7 +431,6 @@ class RefFreePipeline:
                 group = filename.stem.split("_")[1]
                 temp_dict = pickle.load(in_file)
                 temp_dict = {portek.decode_kmer(id, self.k):positions for id, positions in temp_dict.items()}
-                # group_distros[group] = {}
                 kmers = self.matrices["enriched"].index
                 filtered_dict = {kmer:Counter(positions) for kmer, positions in temp_dict.items() if kmer in kmers}
                 ratio_dict = {}
@@ -456,5 +455,7 @@ class RefFreePipeline:
     def save_group_distros(self, verbose:bool = False):
         group_avg_pos_df = pd.DataFrame(self.group_avg_pos)
         group_avg_pos_df["group"] = self.matrices["enriched"]["group"]
+        if verbose == True:
+            print(f"\nSaving average positions of {len(group_avg_pos_df)} {self.k}-mers.")
         group_avg_pos_df.to_csv(f"{self.project_dir}/temp/group_avg_pos.csv")
 
