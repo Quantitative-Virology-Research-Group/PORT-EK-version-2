@@ -119,15 +119,11 @@ def main():
 
     elif args.tool == "map":
         start_time = datetime.now()
-        if args.rf == False:
-            mapping_pipeline = portek.MappingPipeline(args.project_dir, args.k)
-            mapping_pipeline.run_mapping(verbose=args.verbose)
-            mapping_pipeline.analyze_mapping(verbose=args.verbose)
-            mapping_pipeline.save_mappings_df()
-        else:
-            mapping_pipeline = portek.RefFreePipeline(args.project_dir, args.k)
-            mapping_pipeline.get_kmer_pos("enriched", verbose=args.verbose)
-            mapping_pipeline.save_group_distros(verbose=args.verbose)
+        mapping_pipeline = portek.MappingPipeline(args.project_dir, args.k)
+        mapping_pipeline.run_mapping(verbose=args.verbose)
+        mapping_pipeline.analyze_mapping(verbose=args.verbose)
+        mapping_pipeline.save_mappings_df()
+
     elif args.tool == "classify":
         pass
 

@@ -82,6 +82,9 @@ class MappingPipeline:
             )
 
         self.mutations = None
+        self.sample_list = None
+        self.sample_group_dict = None
+        self.group_avg_pos = None
 
     def _check_bowtie2_path(self):
         return shutil.which("bowtie2")
@@ -170,7 +173,10 @@ class MappingPipeline:
         for read in reads:
             read_dict["kmer"].append(read.query_name)
             read_dict["flag"].append(read.flag)
-            read_dict["ref_pos"].append(read.reference_start)
+            if read.reference_start == -1:
+                read_dict["ref_pos"].append(0)
+            else:
+                read_dict["ref_pos"].append(read.reference_start)
             if read.cigarstring == None:
                 read_dict["CIGAR"].append("")
             else:
@@ -189,12 +195,6 @@ class MappingPipeline:
             lambda kmer: self.matrices["enriched"].loc[kmer, "group"]
         )
         return mappings_df
-
-    def _detect_unmapped_CIGAR(self, CIGAR_list: list) -> bool:
-        if "S" in CIGAR_list or "H" in CIGAR_list or len(CIGAR_list) == 0:
-            return True
-        else:
-            return False
 
     def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
         ref_start = map_pos
@@ -281,43 +281,103 @@ class MappingPipeline:
                 f"{mutation_as_tuple[0]}{mutation_as_tuple[1]}>{mutation_as_tuple[2]}"
             )
         return mutation_as_text
+    
+    def _get_samples(self, verbose:bool = False):
+        sample_list_in_path = pathlib.Path(f"{self.project_dir}/input/indices").glob(
+            "*sample_list.pkl"
+        )
+        sample_list = []
+        for filename in sample_list_in_path:
+            with open(filename, mode="rb") as in_file:
+                partial_list = pickle.load(in_file)
+            group = filename.stem.split("_")[0]
+            partial_list = [f"{group}_{sample_name}" for sample_name in partial_list]
+            sample_list.extend(partial_list)
+        sample_group_dict = {
+            f"{group}": [
+                sample for sample in sample_list if sample.split("_")[0] == f"{group}"
+            ]
+            for group in self.sample_groups
+        }
+        self.sample_list = sample_list
+        self.sample_group_dict = sample_group_dict
 
+    def _get_kmer_pos(self, matrix_type: str, verbose: bool = False):
+        self._get_samples(verbose)
+        print(f"\nLoading {matrix_type} {self.k}-mer position distributions.")
+        in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
+            f"{self.k}mer_*_pos_dict.pkl"
+        )
+        if verbose == True:
+            files_counter = 1
+            tot_files = len(self.sample_groups)
+        group_avg_pos = {}
+        for filename in in_path:
+            with open(filename, mode="rb") as in_file:
+                group = filename.stem.split("_")[1]
+                temp_dict = pickle.load(in_file)
+                temp_dict = {portek.decode_kmer(id, self.k):positions for id, positions in temp_dict.items()}
+                kmers = self.matrices["enriched"].index
+                filtered_dict = {kmer:Counter(positions) for kmer, positions in temp_dict.items() if kmer in kmers}
+                ratio_dict = {}
+                avg_pos_dict = {}
+                for kmer, counter in filtered_dict.items():
+                    ratio_dict[kmer] = {position:count/len(self.sample_group_dict[group]) for position,count in counter.items()}
+                    avg_pos_dict[kmer] = sum([pos*ratio for pos,ratio in ratio_dict[kmer].items()])/sum(ratio_dict[kmer].values())
+                group_avg_pos[group] = avg_pos_dict
+                group_avg_pos[f"{group}_wt"] = {kmer:group_avg_pos[group][kmer]*len(self.sample_group_dict[group])/len(self.sample_list) for kmer in group_avg_pos[group].keys()}
+            if verbose == True:
+                print(
+                    f"Loaded {self.k}-mer distributions from {files_counter} of {tot_files} groups.",
+                    end="\r",
+                    flush=True,
+                )
+                files_counter += 1
+
+        group_avg_pos_df = pd.DataFrame(group_avg_pos)
+        weighted_avg_cols = [f"{group}_wt" for group in self.sample_groups]
+        group_avg_pos_df["total"] = group_avg_pos_df[weighted_avg_cols].sum(axis=1)
+        group_avg_pos_df.drop(columns=weighted_avg_cols, inplace=True)
+        
+        return group_avg_pos_df
+    
     def analyze_mapping(self, verbose: bool = False):
         mappings_df = self._read_sam_to_df()
         mappings_df["mutations"] = "WT"
-        mutations_dict = {}
-        for row in mappings_df.itertuples():
-            if self._detect_unmapped_CIGAR(row.CIGAR) == True:
-                mappings_df.loc[row.Index, ["ref_pos", "n_mismatch"]] = 0
-                mappings_df.loc[row.Index, "mutations"] = "NA"
-                mappings_df.loc[row.Index, "flag"] = 4
-            elif row.n_mismatch > 0:
-                mutations_as_tuples = self._find_variants(
-                    self.ref_seq, row.kmer, row.ref_pos, row.CIGAR
-                )
-                mappings_df.loc[row.Index, "mutations"] = "; ".join(
-                    [self._mutation_tuple_to_text(mut) for mut in mutations_as_tuples]
-                )
-                for mutation in mutations_as_tuples:
-                    mutation_text = self._mutation_tuple_to_text(mutation)
-                    if mutation_text not in mutations_dict.keys():
-                        mutations_dict[mutation_text] = [row.kmer]
-                    else:
-                        mutations_dict[mutation_text].append(row.kmer)
+        mappings_df = pd.concat([mappings_df, self._get_kmer_pos("enriched", verbose)], axis=1)
+        # mutations_dict = {}
+        # for row in mappings_df.itertuples():
+        #     if self._detect_unmapped_CIGAR(row.CIGAR) == True:
+        #         mappings_df.loc[row.Index, ["ref_pos", "n_mismatch"]] = 0
+        #         mappings_df.loc[row.Index, "mutations"] = "NA"
+        #         mappings_df.loc[row.Index, "flag"] = 4
+        #     elif row.n_mismatch > 0:
+        #         mutations_as_tuples = self._find_variants(
+        #             self.ref_seq, row.kmer, row.ref_pos, row.CIGAR
+        #         )
+        #         mappings_df.loc[row.Index, "mutations"] = "; ".join(
+        #             [self._mutation_tuple_to_text(mut) for mut in mutations_as_tuples]
+        #         )
+        #         for mutation in mutations_as_tuples:
+        #             mutation_text = self._mutation_tuple_to_text(mutation)
+        #             if mutation_text not in mutations_dict.keys():
+        #                 mutations_dict[mutation_text] = [row.kmer]
+        #             else:
+        #                 mutations_dict[mutation_text].append(row.kmer)
 
-        num_kmers = len(self.matrices["enriched"])
-        num_primary_mappings = len(mappings_df[mappings_df["flag"] == 0])
-        num_secondary_mappings = len(mappings_df[mappings_df["flag"] == 256])
-        num_unmapped = len(mappings_df[mappings_df["flag"] == 4])
+        # num_kmers = len(self.matrices["enriched"])
+        # num_primary_mappings = len(mappings_df[mappings_df["flag"] == 0])
+        # num_secondary_mappings = len(mappings_df[mappings_df["flag"] == 256])
+        # num_unmapped = len(mappings_df[mappings_df["flag"] == 4])
 
-        if verbose == True:
-            print(
-                f"\nMapping of {num_kmers} {self.k}-mers resulted in {num_primary_mappings} primary mappings and {num_secondary_mappings} secondary mappings."
-            )
-            print(f"{num_unmapped} {self.k}-mers couldn't be mapped.")
+        # if verbose == True:
+        #     print(
+        #         f"\nMapping of {num_kmers} {self.k}-mers resulted in {num_primary_mappings} primary mappings and {num_secondary_mappings} secondary mappings."
+        #     )
+        #     print(f"{num_unmapped} {self.k}-mers couldn't be mapped.")
 
         self.matrices["mappings"] = mappings_df
-        return mutations_dict
+        # return mutations_dict
 
     def aggregate_mutations(self, mutations_dict):
         aggregate_dict = {}
@@ -330,9 +390,7 @@ class MappingPipeline:
 
     def save_mappings_df(self):
         print(f"\nSaving {self.k}-mer mappings.")
-        df_to_save = self.matrices["mappings"][
-            ["kmer", "ref_pos", "group", "mutations"]
-        ].copy()
+        df_to_save = self.matrices["mappings"].copy()
         df_to_save["ref_pos"] = df_to_save["ref_pos"].apply(
             lambda pos: pos + 1 if pos > 0 else pos
         )
@@ -395,61 +453,9 @@ class RefFreePipeline:
         self.sample_list = None
         self.sample_group_dict = None
 
-    def _get_samples(self, verbose:bool = False):
-        sample_list_in_path = pathlib.Path(f"{self.project_dir}/input/indices").glob(
-            "*sample_list.pkl"
-        )
-        sample_list = []
-        for filename in sample_list_in_path:
-            with open(filename, mode="rb") as in_file:
-                partial_list = pickle.load(in_file)
-            group = filename.stem.split("_")[0]
-            partial_list = [f"{group}_{sample_name}" for sample_name in partial_list]
-            sample_list.extend(partial_list)
-        sample_group_dict = {
-            f"{group}": [
-                sample for sample in sample_list if sample.split("_")[0] == f"{group}"
-            ]
-            for group in self.sample_groups
-        }
-        self.sample_list = sample_list
-        self.sample_group_dict = sample_group_dict
-    
-    def get_kmer_pos(self, matrix_type: str, verbose: bool = False):
-        self._get_samples(verbose)
-        print(f"\nGetting {matrix_type} {self.k}-mer position distributions.")
-        in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
-            f"{self.k}mer_*_pos_dict.pkl"
-        )
-        if verbose == True:
-            files_counter = 1
-            tot_files = len(self.sample_groups)
-        group_distros = {}
-        group_avg_pos = {}
-        for filename in in_path:
-            with open(filename, mode="rb") as in_file:
-                group = filename.stem.split("_")[1]
-                temp_dict = pickle.load(in_file)
-                temp_dict = {portek.decode_kmer(id, self.k):positions for id, positions in temp_dict.items()}
-                kmers = self.matrices["enriched"].index
-                filtered_dict = {kmer:Counter(positions) for kmer, positions in temp_dict.items() if kmer in kmers}
-                ratio_dict = {}
-                avg_pos_dict = {}
-                for kmer, counter in filtered_dict.items():
-                    ratio_dict[kmer] = {position:count/len(self.sample_group_dict[group]) for position,count in counter.items()}
-                    avg_pos_dict[kmer] = sum([pos*ratio for pos,ratio in ratio_dict[kmer].items()])/sum(ratio_dict[kmer].values())
-                group_distros[group] = ratio_dict
-                group_avg_pos[group] = avg_pos_dict
 
-            if verbose == True:
-                print(
-                    f"Loaded {self.k}-mer distributions from {files_counter} of {tot_files} groups.",
-                    end="\r",
-                    flush=True,
-                )
-                files_counter += 1
-        self.group_distros = group_distros
-        self.group_avg_pos = group_avg_pos
+    
+
 
     
     def save_group_distros(self, verbose:bool = False):
