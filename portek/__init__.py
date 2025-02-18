@@ -24,4 +24,3 @@ from .portek_us_findk import UsFindOptimalKPipeline
 from .portek_us import UnsupervisedKmersPipeline
 from .portek_enriched import EnrichedKmersPipeline
 from .portek_map import MappingPipeline
-from .portek_map import RefFreePipeline

@@ -14,6 +14,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pysam
+from scipy.stats import linregress
 from Bio import SeqIO
 
 import portek
@@ -86,6 +87,26 @@ class MappingPipeline:
         self.sample_group_dict = None
         self.group_avg_pos = None
 
+    def get_samples(self, verbose:bool = False):
+        sample_list_in_path = pathlib.Path(f"{self.project_dir}/input/indices").glob(
+            "*sample_list.pkl"
+        )
+        sample_list = []
+        for filename in sample_list_in_path:
+            with open(filename, mode="rb") as in_file:
+                partial_list = pickle.load(in_file)
+            group = filename.stem.split("_")[0]
+            partial_list = [f"{group}_{sample_name}" for sample_name in partial_list]
+            sample_list.extend(partial_list)
+        sample_group_dict = {
+            f"{group}": [
+                sample for sample in sample_list if sample.split("_")[0] == f"{group}"
+            ]
+            for group in self.sample_groups
+        }
+        self.sample_list = sample_list
+        self.sample_group_dict = sample_group_dict
+
     def _check_bowtie2_path(self):
         return shutil.which("bowtie2")
 
@@ -122,7 +143,6 @@ class MappingPipeline:
         seed_length = int(math.ceil(self.k / 2))
         map_cmd = [
             f"bowtie2",
-            "-a",
             "--norc",
             "-L",
             f"{seed_length}",
@@ -186,13 +206,18 @@ class MappingPipeline:
             else:
                 read_dict["n_mismatch"].append(0)
 
-        mappings_df = pd.DataFrame(read_dict)
+        mappings_df = pd.DataFrame(read_dict).set_index("kmer")
         mappings_df["CIGAR"] = mappings_df["CIGAR"].apply(self._parse_CIGAR)
         mappings_df.loc[:, ["flag", "ref_pos", "n_mismatch"]] = mappings_df.loc[
             :, ["flag", "ref_pos", "n_mismatch"]
         ].astype(int)
-        mappings_df["group"] = mappings_df["kmer"].apply(
-            lambda kmer: self.matrices["enriched"].loc[kmer, "group"]
+        mappings_df["group"] = self.matrices["enriched"]["group"]
+        mappings_df["mutations"] = "WT"
+        mappings_df["ref_pos_pred"] = 0.0
+        mappings_df["ref_pos_err"] = 0.0
+        mappings_df["mapping_ok"] = 0
+        mappings_df["ref_pos"] = mappings_df["ref_pos"].apply(
+            lambda pos: pos + 1 if pos > 0 else pos
         )
         return mappings_df
 
@@ -282,29 +307,8 @@ class MappingPipeline:
             )
         return mutation_as_text
     
-    def _get_samples(self, verbose:bool = False):
-        sample_list_in_path = pathlib.Path(f"{self.project_dir}/input/indices").glob(
-            "*sample_list.pkl"
-        )
-        sample_list = []
-        for filename in sample_list_in_path:
-            with open(filename, mode="rb") as in_file:
-                partial_list = pickle.load(in_file)
-            group = filename.stem.split("_")[0]
-            partial_list = [f"{group}_{sample_name}" for sample_name in partial_list]
-            sample_list.extend(partial_list)
-        sample_group_dict = {
-            f"{group}": [
-                sample for sample in sample_list if sample.split("_")[0] == f"{group}"
-            ]
-            for group in self.sample_groups
-        }
-        self.sample_list = sample_list
-        self.sample_group_dict = sample_group_dict
-
-    def _get_kmer_pos(self, matrix_type: str, verbose: bool = False):
-        self._get_samples(verbose)
-        print(f"\nLoading {matrix_type} {self.k}-mer position distributions.")
+    def _get_kmer_pos(self, verbose: bool = False):
+        print(f"\nLoading enriched {self.k}-mer position distributions.")
         in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
             f"{self.k}mer_*_pos_dict.pkl"
         )
@@ -338,13 +342,54 @@ class MappingPipeline:
         weighted_avg_cols = [f"{group}_wt" for group in self.sample_groups]
         group_avg_pos_df["total"] = group_avg_pos_df[weighted_avg_cols].sum(axis=1)
         group_avg_pos_df.drop(columns=weighted_avg_cols, inplace=True)
-        
+        group_avg_pos_df.columns = [f"{col}_avg_pos" for col in group_avg_pos_df.columns]
+
         return group_avg_pos_df
     
+    def _match_mappings(self, ref_pos:pd.Series, avg_pos:pd.Series):
+        mapped_to_ref = ref_pos[ref_pos>0]
+        if len(mapped_to_ref) < 3:
+            print(f"Not enough mapped kmers in {ref_pos.name}. Skipping.")
+            return 0,0.0,0.0,0.0
+        avg_pos = avg_pos.loc[mapped_to_ref.index]
+        initial_model = linregress(avg_pos, mapped_to_ref)
+        ref_pos_pred = avg_pos*initial_model.slope + initial_model.intercept
+        ref_pos_error = ref_pos_pred-mapped_to_ref
+        rs = []
+        slopes = []
+        intercepts = []
+        thrs = [n for n in range(100, int(max(ref_pos_error))+101, 100)]
+        if len(thrs) == 1:
+            return thrs[0], initial_model.slope, initial_model.intercept, initial_model.rvalue
+        thrs.reverse()
+        for thr in thrs:
+            below_threshold = avg_pos[ref_pos_error<thr]
+            mapped_to_ref = ref_pos.loc[below_threshold.index]
+            model = linregress(below_threshold, mapped_to_ref)
+            rs.append(model.rvalue)
+            slopes.append(model.slope)
+            intercepts.append(model.intercept)
+        best_model = rs.index(max(rs))
+        return thrs[best_model], slopes[best_model], intercepts[best_model], rs[best_model]
+         
+
     def analyze_mapping(self, verbose: bool = False):
         mappings_df = self._read_sam_to_df()
-        mappings_df["mutations"] = "WT"
-        mappings_df = pd.concat([mappings_df, self._get_kmer_pos("enriched", verbose)], axis=1)
+        mappings_df = pd.concat([mappings_df, self._get_kmer_pos(verbose)], axis=1)
+        mappings_df["thr"] = 0
+        for group in mappings_df["group"].unique():
+            group_enriched_kmres = mappings_df[mappings_df["group"]==group].index
+            ref_pos = mappings_df.loc[group_enriched_kmres, "ref_pos"]
+            if group == "conserved":
+                avg_pos_col_name = "total_avg_pos"
+            else:
+                avg_pos_col_name =  f"{group.split('_')[0]}_avg_pos"
+            avg_pos = mappings_df.loc[group_enriched_kmres, avg_pos_col_name]
+            thr, slope, intercept, r2 = self._match_mappings(ref_pos, avg_pos)
+            mappings_df.loc[group_enriched_kmres, "thr"] = thr
+            mappings_df.loc[group_enriched_kmres, "ref_pos_pred"]  = slope * mappings_df.loc[group_enriched_kmres, avg_pos_col_name] + intercept
+            mappings_df.loc[group_enriched_kmres, "ref_pos_err"] = mappings_df.loc[group_enriched_kmres, "ref_pos_pred"]-mappings_df.loc[group_enriched_kmres, "ref_pos"]
+            mappings_df.loc[group_enriched_kmres, "mapping_ok"] = mappings_df.loc[group_enriched_kmres, "ref_pos_err"].apply(lambda err: 0 if abs(err) > thr else 1)
         # mutations_dict = {}
         # for row in mappings_df.itertuples():
         #     if self._detect_unmapped_CIGAR(row.CIGAR) == True:
@@ -375,7 +420,6 @@ class MappingPipeline:
         #         f"\nMapping of {num_kmers} {self.k}-mers resulted in {num_primary_mappings} primary mappings and {num_secondary_mappings} secondary mappings."
         #     )
         #     print(f"{num_unmapped} {self.k}-mers couldn't be mapped.")
-
         self.matrices["mappings"] = mappings_df
         # return mutations_dict
 
@@ -391,77 +435,8 @@ class MappingPipeline:
     def save_mappings_df(self):
         print(f"\nSaving {self.k}-mer mappings.")
         df_to_save = self.matrices["mappings"].copy()
-        df_to_save["ref_pos"] = df_to_save["ref_pos"].apply(
-            lambda pos: pos + 1 if pos > 0 else pos
-        )
         df_to_save.index.name = "id"
         df_to_save.sort_values("ref_pos", inplace=True)
         df_to_save.to_csv(
             f"{self.project_dir}/output/enriched_{self.k}mers_mappings.csv"
         )
-
-
-class RefFreePipeline:
-
-    def __init__(self, project_dir: str, k):
-        if os.path.isdir(project_dir) == True:
-            self.project_dir = project_dir
-        else:
-            raise NotADirectoryError("Project directory does not exist!")
-
-        if type(k) != int:
-            raise TypeError("k must by an integer!")
-        else:
-            self.k = k
-
-        try:
-            with open(f"{project_dir}/config.yaml", "r") as config_file:
-                config = yaml.safe_load(config_file)
-            self.sample_groups = config["sample_groups"]
-            self.mode = config["mode"]
-            if self.mode == "ovr":
-                self.goi = config["goi"]
-                self.control_groups = self.sample_groups.copy()
-                self.control_groups.remove(self.goi)
-            elif self.mode == "ava":
-                self.goi = None
-                self.control_groups = None
-            else:
-                raise ValueError(
-                    "Unrecognized analysis mode, should by ava or ovr. Check your config file!"
-                )
-
-        except FileNotFoundError:
-            raise FileNotFoundError(f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
-        except ValueError:
-            raise ValueError(
-                f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
-
-        self.matrices = {}
-        try:
-            self.matrices["enriched"] = pd.read_csv(
-                f"{project_dir}/output/enriched_{self.k}mers_stats.csv", index_col=0
-            )
-
-        except:
-            raise FileNotFoundError(
-                f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK enriched first!"
-            )
-        self.group_distros = None
-        self.sample_list = None
-        self.sample_group_dict = None
-
-
-    
-
-
-    
-    def save_group_distros(self, verbose:bool = False):
-        group_avg_pos_df = pd.DataFrame(self.group_avg_pos)
-        group_avg_pos_df["group"] = self.matrices["enriched"]["group"]
-        if verbose == True:
-            print(f"\nSaving average positions of {len(group_avg_pos_df)} {self.k}-mers.")
-        group_avg_pos_df.to_csv(f"{self.project_dir}/temp/group_avg_pos.csv")
-

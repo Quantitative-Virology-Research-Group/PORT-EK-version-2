@@ -120,6 +120,7 @@ def main():
     elif args.tool == "map":
         start_time = datetime.now()
         mapping_pipeline = portek.MappingPipeline(args.project_dir, args.k)
+        mapping_pipeline.get_samples(verbose=args.verbose)
         mapping_pipeline.run_mapping(verbose=args.verbose)
         mapping_pipeline.analyze_mapping(verbose=args.verbose)
         mapping_pipeline.save_mappings_df()
