@@ -359,9 +359,9 @@ class MappingPipeline:
         slopes = []
         intercepts = []
         thrs = [n for n in range(100, int(max(ref_pos_error))+101, 100)]
+        print(thrs)
         if len(thrs) == 1:
             return thrs[0], initial_model.slope, initial_model.intercept, initial_model.rvalue
-        thrs.reverse()
         for thr in thrs:
             below_threshold = avg_pos[ref_pos_error<thr]
             mapped_to_ref = ref_pos.loc[below_threshold.index]
@@ -380,6 +380,7 @@ class MappingPipeline:
         for group in mappings_df["group"].unique():
             group_enriched_kmres = mappings_df[mappings_df["group"]==group].index
             ref_pos = mappings_df.loc[group_enriched_kmres, "ref_pos"]
+            ref_pos.name = group
             if group == "conserved":
                 avg_pos_col_name = "total_avg_pos"
             else:
@@ -390,6 +391,17 @@ class MappingPipeline:
             mappings_df.loc[group_enriched_kmres, "ref_pos_pred"]  = slope * mappings_df.loc[group_enriched_kmres, avg_pos_col_name] + intercept
             mappings_df.loc[group_enriched_kmres, "ref_pos_err"] = mappings_df.loc[group_enriched_kmres, "ref_pos_pred"]-mappings_df.loc[group_enriched_kmres, "ref_pos"]
             mappings_df.loc[group_enriched_kmres, "mapping_ok"] = mappings_df.loc[group_enriched_kmres, "ref_pos_err"].apply(lambda err: 0 if abs(err) > thr else 1)
+            fig, ax = plt.subplots()
+            sns.scatterplot(x=avg_pos, y=mappings_df.loc[group_enriched_kmres,"ref_pos"], hue=mappings_df["mapping_ok"])
+            plt.savefig(f"{self.project_dir}/temp/{group}_model.svg", format="svg", dpi=300)
+            fig, ax = plt.subplots()
+            sns.scatterplot(x=avg_pos, y=mappings_df.loc[group_enriched_kmres, "ref_pos_err"],  hue=mappings_df["mapping_ok"])
+            plt.savefig(f"{self.project_dir}/temp/{group}_residues.svg", format="svg", dpi=300)
+        properly_mapped = mappings_df[mappings_df["mapping_ok"]==1]
+        fig, ax = plt.subplots()
+        properly_mapped.hist("ref_pos", by="group",bins=100)
+        plt.tight_layout()
+        plt.savefig(f"{self.project_dir}/temp/hist.svg", format="svg", dpi=300)
         # mutations_dict = {}
         # for row in mappings_df.itertuples():
         #     if self._detect_unmapped_CIGAR(row.CIGAR) == True:
