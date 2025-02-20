@@ -1,6 +1,7 @@
 classification in one module - portek_classify
 add reference-free mapping
 add enriched/conserved/variable genome regions plots
+add max data frame memory size as a parameter
 clean up prints
 documentation
 tests
