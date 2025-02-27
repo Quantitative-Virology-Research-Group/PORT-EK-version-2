@@ -14,7 +14,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pysam
-from scipy.stats import linregress
+from scipy.stats import linregress, gaussian_kde
+from scipy.ndimage import histogram
+from scipy.signal import find_peaks
 from Bio import SeqIO
 
 import portek
@@ -46,16 +48,19 @@ class MappingPipeline:
                 self.goi = None
                 self.control_groups = None
             else:
-                raise ValueError(
-                    "Unrecognized analysis mode, should by ava or ovr. Check your config file!"
-                )
+                err_msg = "Unrecognized analysis mode, should by ava or ovr. Check your config file!"
+                raise ValueError()
 
             self.ref_seq_name = ".".join(config["ref_seq"].split(".")[:-1])
-            self.ref_seq = str(
-                SeqIO.read(
-                    f"{project_dir}/input/{config['ref_seq']}", format="fasta"
-                ).seq
-            )
+            try:
+                self.ref_seq = str(
+                    SeqIO.read(
+                        f"{project_dir}/input/{config['ref_seq']}", format="fasta"
+                    ).seq
+                )
+            except ValueError:
+                err_msg = "No or wrong reference sequence file!"
+                raise ValueError()
             if "ref_genes" in config.keys():
                 self.ref_genes = config["ref_genes"]
             else:
@@ -67,9 +72,7 @@ class MappingPipeline:
             raise FileNotFoundError(f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
             )
         except ValueError:
-            raise ValueError(
-                f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
+            raise ValueError(err_msg)
 
         self.matrices = {}
         try:
@@ -93,6 +96,7 @@ class MappingPipeline:
         )
         sample_list = []
         for filename in sample_list_in_path:
+            print(filename)
             with open(filename, mode="rb") as in_file:
                 partial_list = pickle.load(in_file)
             group = filename.stem.split("_")[0]
@@ -104,6 +108,8 @@ class MappingPipeline:
             ]
             for group in self.sample_groups
         }
+        if len(sample_list) == 0:
+            raise FileNotFoundError("No sample lists found!")
         self.sample_list = sample_list
         self.sample_group_dict = sample_group_dict
 
@@ -144,6 +150,7 @@ class MappingPipeline:
         map_cmd = [
             f"bowtie2",
             "--norc",
+            "-a",
             "-L",
             f"{seed_length}",
             "-x",
@@ -206,7 +213,7 @@ class MappingPipeline:
             else:
                 read_dict["n_mismatch"].append(0)
 
-        mappings_df = pd.DataFrame(read_dict).set_index("kmer")
+        mappings_df = pd.DataFrame(read_dict)
         mappings_df["CIGAR"] = mappings_df["CIGAR"].apply(self._parse_CIGAR)
         mappings_df.loc[:, ["flag", "ref_pos", "n_mismatch"]] = mappings_df.loc[
             :, ["flag", "ref_pos", "n_mismatch"]
@@ -219,6 +226,7 @@ class MappingPipeline:
         mappings_df["ref_pos"] = mappings_df["ref_pos"].apply(
             lambda pos: pos + 1 if pos > 0 else pos
         )
+        mappings_df["group"] = mappings_df["kmer"].apply(lambda kmer: self.matrices["enriched"].loc[kmer,"group"])
         return mappings_df
 
     def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
@@ -307,7 +315,33 @@ class MappingPipeline:
             )
         return mutation_as_text
     
-    def _get_kmer_pos(self, verbose: bool = False):
+    def _load_kmer_pos(self, input_filename:pathlib.Path, kmers:np.ndarray, kmer_distros:dict, verbose: bool = False) -> None:
+        with open(input_filename, mode="rb") as in_file:
+            group = f"{input_filename.stem.split('_')[1]}_enriched"
+            temp_dict = pickle.load(in_file)
+        temp_dict = {portek.decode_kmer(id, self.k):positions for id, positions in temp_dict.items()}
+        kmer_distros[group] = {kmer:positions for kmer, positions in temp_dict.items() if kmer in kmers}
+
+    def _get_total_distros(self, kmer_distros:dict) -> None:
+        kmer_distros["conserved"] = {}
+        for distros in kmer_distros.values():
+            for kmer, distro in distros.items():
+                if kmer in kmer_distros["conserved"].keys():
+                    kmer_distros["conserved"][kmer].extend(distro)
+                else:
+                    kmer_distros["conserved"][kmer] = distro
+    def _get_peaks_from_distro(self, kmer_distros:dict) -> dict:
+        distro_peaks = {group:{} for group in kmer_distros.keys()}
+        for group in distro_peaks.keys():
+            for kmer, distro in kmer_distros[group].items():
+                max_pos = max(max(distro), len(self.ref_seq))
+                bins = max_pos
+                histogram_over_genome = histogram(distro, 0, max_pos, bins)
+                peaks = find_peaks(histogram_over_genome, distance=bins/10)
+                distro_peaks[group][kmer] = peaks[0]
+        return distro_peaks
+
+    def _get_kmer_peaks(self, mappings_df: pd.DataFrame, verbose: bool = False):
         print(f"\nLoading enriched {self.k}-mer position distributions.")
         in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
             f"{self.k}mer_*_pos_dict.pkl"
@@ -315,21 +349,10 @@ class MappingPipeline:
         if verbose == True:
             files_counter = 1
             tot_files = len(self.sample_groups)
-        group_avg_pos = {}
+        kmer_distros = {}
+        kmers = mappings_df["kmer"].unique()
         for filename in in_path:
-            with open(filename, mode="rb") as in_file:
-                group = filename.stem.split("_")[1]
-                temp_dict = pickle.load(in_file)
-                temp_dict = {portek.decode_kmer(id, self.k):positions for id, positions in temp_dict.items()}
-                kmers = self.matrices["enriched"].index
-                filtered_dict = {kmer:Counter(positions) for kmer, positions in temp_dict.items() if kmer in kmers}
-                ratio_dict = {}
-                avg_pos_dict = {}
-                for kmer, counter in filtered_dict.items():
-                    ratio_dict[kmer] = {position:count/len(self.sample_group_dict[group]) for position,count in counter.items()}
-                    avg_pos_dict[kmer] = sum([pos*ratio for pos,ratio in ratio_dict[kmer].items()])/sum(ratio_dict[kmer].values())
-                group_avg_pos[group] = avg_pos_dict
-                group_avg_pos[f"{group}_wt"] = {kmer:group_avg_pos[group][kmer]*len(self.sample_group_dict[group])/len(self.sample_list) for kmer in group_avg_pos[group].keys()}
+            self._load_kmer_pos(filename, kmers, kmer_distros, verbose)
             if verbose == True:
                 print(
                     f"Loaded {self.k}-mer distributions from {files_counter} of {tot_files} groups.",
@@ -337,71 +360,63 @@ class MappingPipeline:
                     flush=True,
                 )
                 files_counter += 1
-
-        group_avg_pos_df = pd.DataFrame(group_avg_pos)
-        weighted_avg_cols = [f"{group}_wt" for group in self.sample_groups]
-        group_avg_pos_df["total"] = group_avg_pos_df[weighted_avg_cols].sum(axis=1)
-        group_avg_pos_df.drop(columns=weighted_avg_cols, inplace=True)
-        group_avg_pos_df.columns = [f"{col}_avg_pos" for col in group_avg_pos_df.columns]
-
-        return group_avg_pos_df
+        self._get_total_distros(kmer_distros)
+        distro_peaks = self._get_peaks_from_distro(kmer_distros)
+        return distro_peaks
+        
+    def _get_real_pos(self, group:str, kmer:str, ref_pos:int, actual_positions:dict) -> int:
+        peaks = actual_positions[group][kmer]
+        diffs = peaks - ref_pos
+        return peaks[np.argmin(diffs)]
     
-    def _match_mappings(self, ref_pos:pd.Series, avg_pos:pd.Series):
-        mapped_to_ref = ref_pos[ref_pos>0]
-        if len(mapped_to_ref) < 3:
-            print(f"Not enough mapped kmers in {ref_pos.name}. Skipping.")
-            return 0,0.0,0.0,0.0
-        avg_pos = avg_pos.loc[mapped_to_ref.index]
-        initial_model = linregress(avg_pos, mapped_to_ref)
-        ref_pos_pred = avg_pos*initial_model.slope + initial_model.intercept
-        ref_pos_error = ref_pos_pred-mapped_to_ref
-        rs = []
-        slopes = []
-        intercepts = []
-        thrs = [n for n in range(100, int(max(ref_pos_error))+101, 100)]
-        print(thrs)
-        if len(thrs) == 1:
-            return thrs[0], initial_model.slope, initial_model.intercept, initial_model.rvalue
-        for thr in thrs:
-            below_threshold = avg_pos[ref_pos_error<thr]
-            mapped_to_ref = ref_pos.loc[below_threshold.index]
-            model = linregress(below_threshold, mapped_to_ref)
-            rs.append(model.rvalue)
-            slopes.append(model.slope)
-            intercepts.append(model.intercept)
-        best_model = rs.index(max(rs))
-        return thrs[best_model], slopes[best_model], intercepts[best_model], rs[best_model]
-         
+    def _predict_pos(self, ref_pos:pd.Series, real_pos:pd.Series, regress) -> tuple[pd.Series, pd.Series]:
+        pred_pos = regress.slope*real_pos+regress.intercept
+        pred_pos.name = "pred_pos"
+        pred_err = pred_pos-ref_pos
+        pred_err.name = "pred_err"
+        return pred_pos, pred_err
+    
+    def _tune_regress(self, ref_pos, real_pos) -> tuple[pd.Series, pd.Series]:
+        init_regress = linregress(ref_pos, real_pos)
+        _, init_err = self._predict_pos(ref_pos, real_pos, init_regress)
+        r2s = []
+        regresses = []
+        for thr in range(100, int(max(init_err)), 100):
+            ref_pos_trim = ref_pos[abs(init_err)<thr]
+            real_pos_trim = real_pos[abs(init_err)<thr]
+            regress = linregress(ref_pos_trim, real_pos_trim)
+            r2s.append(regress.rvalue)
+            regresses.append(regress)
+            print(thr, regress.rvalue)
 
-    def analyze_mapping(self, verbose: bool = False):
-        mappings_df = self._read_sam_to_df()
-        mappings_df = pd.concat([mappings_df, self._get_kmer_pos(verbose)], axis=1)
-        mappings_df["thr"] = 0
+    def _verify_mapping(self, mappings_df:pd.DataFrame, verbose:bool = False) -> None:
         for group in mappings_df["group"].unique():
-            group_enriched_kmres = mappings_df[mappings_df["group"]==group].index
-            ref_pos = mappings_df.loc[group_enriched_kmres, "ref_pos"]
-            ref_pos.name = group
-            if group == "conserved":
-                avg_pos_col_name = "total_avg_pos"
-            else:
-                avg_pos_col_name =  f"{group.split('_')[0]}_avg_pos"
-            avg_pos = mappings_df.loc[group_enriched_kmres, avg_pos_col_name]
-            thr, slope, intercept, r2 = self._match_mappings(ref_pos, avg_pos)
-            mappings_df.loc[group_enriched_kmres, "thr"] = thr
-            mappings_df.loc[group_enriched_kmres, "ref_pos_pred"]  = slope * mappings_df.loc[group_enriched_kmres, avg_pos_col_name] + intercept
-            mappings_df.loc[group_enriched_kmres, "ref_pos_err"] = mappings_df.loc[group_enriched_kmres, "ref_pos_pred"]-mappings_df.loc[group_enriched_kmres, "ref_pos"]
-            mappings_df.loc[group_enriched_kmres, "mapping_ok"] = mappings_df.loc[group_enriched_kmres, "ref_pos_err"].apply(lambda err: 0 if abs(err) > thr else 1)
-            fig, ax = plt.subplots()
-            sns.scatterplot(x=avg_pos, y=mappings_df.loc[group_enriched_kmres,"ref_pos"], hue=mappings_df["mapping_ok"])
-            plt.savefig(f"{self.project_dir}/temp/{group}_model.svg", format="svg", dpi=300)
-            fig, ax = plt.subplots()
-            sns.scatterplot(x=avg_pos, y=mappings_df.loc[group_enriched_kmres, "ref_pos_err"],  hue=mappings_df["mapping_ok"])
-            plt.savefig(f"{self.project_dir}/temp/{group}_residues.svg", format="svg", dpi=300)
-        properly_mapped = mappings_df[mappings_df["mapping_ok"]==1]
-        fig, ax = plt.subplots()
-        properly_mapped.hist("ref_pos", by="group",bins=100)
-        plt.tight_layout()
-        plt.savefig(f"{self.project_dir}/temp/hist.svg", format="svg", dpi=300)
+            group_enriched_mappings = mappings_df[mappings_df["group"]==group].index
+            ref_pos = mappings_df.loc[group_enriched_mappings, "ref_pos"]
+            real_pos = mappings_df.loc[group_enriched_mappings, "real_pos"]
+            print(group)
+            self._tune_regress(ref_pos, real_pos)
+
+    def analyze_mapping(self, verbose:bool = False):
+        mappings_df = self._read_sam_to_df()
+        actual_positions = self._get_kmer_peaks(mappings_df, verbose)
+        mappings_df["real_pos"] = mappings_df.apply(lambda row: self._get_real_pos(row["group"], row["kmer"], row["ref_pos"], actual_positions), axis=1)
+        self._verify_mapping(mappings_df, verbose)
+        #     mappings_df.loc[group_enriched_kmres, "thr"] = thr
+        #     mappings_df.loc[group_enriched_kmres, "ref_pos_pred"]  = slope * mappings_df.loc[group_enriched_kmres, avg_pos_col_name] + intercept
+        #     mappings_df.loc[group_enriched_kmres, "ref_pos_err"] = mappings_df.loc[group_enriched_kmres, "ref_pos_pred"]-mappings_df.loc[group_enriched_kmres, "ref_pos"]
+        #     mappings_df.loc[group_enriched_kmres, "mapping_ok"] = mappings_df.loc[group_enriched_kmres, "ref_pos_err"].apply(lambda err: 0 if abs(err) > thr else 1)
+        #     fig, ax = plt.subplots()
+        #     sns.scatterplot(x=avg_pos, y=mappings_df.loc[group_enriched_kmres,"ref_pos"], hue=mappings_df["mapping_ok"])
+        #     plt.savefig(f"{self.project_dir}/temp/{group}_model.svg", format="svg", dpi=300)
+        #     fig, ax = plt.subplots()
+        #     sns.scatterplot(x=avg_pos, y=mappings_df.loc[group_enriched_kmres, "ref_pos_err"],  hue=mappings_df["mapping_ok"])
+        #     plt.savefig(f"{self.project_dir}/temp/{group}_residues.svg", format="svg", dpi=300)
+        # properly_mapped = mappings_df[mappings_df["mapping_ok"]==1]
+        # fig, ax = plt.subplots()
+        # properly_mapped.hist("ref_pos", by="group",bins=100)
+        # plt.tight_layout()
+        # plt.savefig(f"{self.project_dir}/temp/hist.svg", format="svg", dpi=300)
         # mutations_dict = {}
         # for row in mappings_df.itertuples():
         #     if self._detect_unmapped_CIGAR(row.CIGAR) == True:

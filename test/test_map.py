@@ -1,143 +1,324 @@
+import pytest
+import os
 import pathlib
-import pickle
 import pandas as pd
+import unittest
 from unittest.mock import patch, mock_open, MagicMock
 from portek.portek_map import MappingPipeline
-import pytest
 
 
-class TestPortekMap:
-    def test_get_kmer_pos(self):
-        sample_groups = ["group1", "group2"]
-        enriched_kmers = ["AAAAAAAAAAAAAAA", "AAAAAAAAAAAAAAC"]
-        sample_list = ["group1_sample1", "group1_sample2", "group2_sample1", "group2_sample2"]
-        sample_group_dict = {
-            "group1": ["group1_sample1", "group1_sample2"],
-            "group2": ["group2_sample1", "group2_sample2"]
-        }
-        matrices = {
-            "enriched": pd.DataFrame(index=enriched_kmers)
-        }
-        mapping_pipeline = MappingPipeline("test/testproject/", k=15)
-        mapping_pipeline.sample_groups = sample_groups
-        mapping_pipeline.sample_list = sample_list
-        mapping_pipeline.sample_group_dict = sample_group_dict
-        mapping_pipeline.matrices = matrices
+class TestMappingPipelineInit:
+    @patch("os.path.isdir")
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("yaml.safe_load")
+    @patch("pandas.read_csv")
+    @patch("Bio.SeqIO.read")
+    def test_init_success(
+        self,
+        mock_seqio_read,
+        mock_read_csv,
+        mock_yaml_load,
+        mock_open,
+        mock_isdir,
+        mock_config,
+        mock_enriched_csv,
+    ):
+        mock_isdir.return_value = True
+        mock_yaml_load.return_value = mock_config
+        mock_read_csv.return_value = mock_enriched_csv
+        mock_seqio_read.return_value.seq = "ATGC"
 
-        mock_kmer_pos_dict = {
-            0: [1, 2],
-            1: [4, 5]
-        }
+        pipeline = MappingPipeline("/fake/dir", 5)
+
+        assert pipeline.project_dir == "/fake/dir"
+        assert pipeline.k == 5
+        assert pipeline.sample_groups == ["group1", "group2"]
+        assert pipeline.mode == "ovr"
+        assert pipeline.goi == "group1"
+        assert pipeline.control_groups == ["group2"]
+        assert pipeline.ref_seq_name == "reference"
+        assert pipeline.ref_seq == "ATGC"
+        assert pipeline.ref_genes == ["gene1", "gene2"]
+        assert pipeline.avg_cols == ["group1_avg", "group2_avg"]
+        assert "enriched" in pipeline.matrices
+        assert pipeline.matrices["enriched"].equals(mock_enriched_csv)
+
+    @patch("os.path.isdir")
+    def test_init_invalid_directory(self, mock_isdir):
+        mock_isdir.return_value = False
+        with pytest.raises(NotADirectoryError):
+            MappingPipeline("/fake/dir", 5)
+
+    @patch("os.path.isdir")
+    def test_init_invalid_k_type(self, mock_isdir):
+        mock_isdir.return_value = True
+        with pytest.raises(TypeError):
+            MappingPipeline("/fake/dir", "not_an_int")
+
+    @patch("os.path.isdir")
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("yaml.safe_load")
+    def test_init_missing_config(self, mock_yaml_load, mock_open, mock_isdir):
+        mock_isdir.return_value = True
+        mock_open.side_effect = FileNotFoundError
+        with pytest.raises(FileNotFoundError):
+            MappingPipeline("/fake/dir", 5)
+
+    @patch("os.path.isdir")
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("yaml.safe_load")
+    def test_init_invalid_mode(
+        self, mock_yaml_load, mock_open, mock_isdir, mock_config
+    ):
+        mock_isdir.return_value = True
+        mock_config["mode"] = "invalid_mode"
+        mock_yaml_load.return_value = mock_config
+        with pytest.raises(ValueError):
+            MappingPipeline("/fake/dir", 5)
+
+    @patch("os.path.isdir")
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("yaml.safe_load")
+    @patch("pandas.read_csv")
+    @patch("Bio.SeqIO.read")
+    def test_init_missing_ref_seq(
+        self,
+        mock_seqio_read,
+        mock_read_csv,
+        mock_yaml_load,
+        mock_open,
+        mock_isdir,
+        mock_config,
+        mock_enriched_csv,
+    ):
+        mock_isdir.return_value = True
+        mock_yaml_load.return_value = mock_config
+        mock_seqio_read.side_effect = ValueError
+        mock_read_csv.return_value = mock_enriched_csv
+        with pytest.raises(ValueError):
+            MappingPipeline("/fake/dir", 5)
+
+    @patch("os.path.isdir")
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("yaml.safe_load")
+    @patch("pandas.read_csv")
+    @patch("Bio.SeqIO.read")
+    def test_init_missing_enriched_csv(
+        self,
+        mock_seqio_read,
+        mock_read_csv,
+        mock_yaml_load,
+        mock_open,
+        mock_isdir,
+        mock_config,
+    ):
+        mock_isdir.return_value = True
+        mock_yaml_load.return_value = mock_config
+        mock_seqio_read.return_value.seq = "ATGC"
+        mock_read_csv.side_effect = FileNotFoundError
+        with pytest.raises(FileNotFoundError):
+            MappingPipeline("/fake/dir", 5)
 
 
-        with patch("pathlib.Path.glob", return_value=[pathlib.Path("/mock/path/15mer_group1_pos_dict.pkl"), pathlib.Path("/mock/path/15mer_group2_pos_dict.pkl")]), \
-            patch("builtins.open", mock_open(read_data=pickle.dumps(mock_kmer_pos_dict))):
-            result = mapping_pipeline._get_kmer_pos(verbose=False)
+class TestMappingPipelineGetSamples:
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("pickle.load")
+    @patch("pathlib.Path.glob")
+    def test_get_samples_success(
+        self, mock_glob, mock_pickle_load, mock_open, mock_proper_mapping_pipeline
+    ):
+        mock_glob.return_value = [
+            pathlib.Path("/fake/dir/input/A_sample_list.pkl"),
+            pathlib.Path("/fake/dir/input/B_sample_list.pkl"),
+        ]
+        mock_pickle_load.return_value = ["sample1", "sample2"]
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.get_samples()
 
-        expected_columns = ["group1_avg_pos", "group2_avg_pos", "total_avg_pos"]
-        assert all(col in result.columns for col in expected_columns)
-        assert result.shape[0] == len(enriched_kmers)
-        assert result.loc["AAAAAAAAAAAAAAA", "group1_avg_pos"] == 1.5
-        assert result.loc["AAAAAAAAAAAAAAA", "group2_avg_pos"] == 1.5
-        assert result.loc["AAAAAAAAAAAAAAA", "total_avg_pos"] == 1.5
-        assert result.loc["AAAAAAAAAAAAAAC", "group1_avg_pos"] == 4.5
-        assert result.loc["AAAAAAAAAAAAAAC", "group2_avg_pos"] == 4.5
-        assert result.loc["AAAAAAAAAAAAAAC", "total_avg_pos"] == 4.5
+        assert pipeline.sample_list == [
+            "A_sample1",
+            "A_sample2",
+            "B_sample1",
+            "B_sample2",
+        ]
 
-    def test_match_mappings_happy_case(self):
-        ref_pos = pd.Series([0, 1000, 1500, 2000, 3000, 4000, 5000, 6000])
-        avg_pos = pd.Series([100, 1100, 1800, 2100, 3100, 4100, 5100, 6700])
-        expected_thr = 100
-        expected_slope = 1.0
-        expected_intercept = -100.0
-        expected_rvalue = 1.0
+    @patch("pathlib.Path.glob")
+    def test_get_samples_empty(self, mock_glob, mock_proper_mapping_pipeline):
+        mock_glob.return_value = []
+        pipeline = mock_proper_mapping_pipeline
+        with pytest.raises(FileNotFoundError):
+            pipeline.get_samples()
 
-        mapping_pipeline = MappingPipeline("test/testproject/", k=15)
-        thr, slope, intercept, rvalue = mapping_pipeline._match_mappings(
-            ref_pos, avg_pos
+
+class TestMappingPipeline_checkBowtie2Path:
+    @patch("shutil.which")
+    def test_check_bowtie2_path_success(self, mock_which, mock_proper_mapping_pipeline):
+        mock_which.return_value = "/usr/bin/bowtie2"
+
+        pipeline = mock_proper_mapping_pipeline
+        assert pipeline._check_bowtie2_path() == "/usr/bin/bowtie2"
+
+    @patch("shutil.which")
+    def test_check_bowtie2_path_not_found(
+        self, mock_which, mock_proper_mapping_pipeline
+    ):
+        mock_which.return_value = None
+        pipeline = mock_proper_mapping_pipeline
+
+        assert pipeline._check_bowtie2_path() == None
+
+    
+class TestMappingPipeline_checkIndexBuilt:
+    @patch("pathlib.Path.glob")
+    def test_check_index_built_success(self, mock_glob, mock_proper_mapping_pipeline):
+        mock_glob.return_value = [pathlib.Path("/fake/dir/index.bt2")]
+        pipeline = mock_proper_mapping_pipeline
+        assert pipeline._check_index_built() == True
+
+    @patch("pathlib.Path.glob")
+    def test_check_index_built_not_found(self, mock_glob, mock_proper_mapping_pipeline):
+        mock_glob.return_value = []
+        pipeline = mock_proper_mapping_pipeline
+        assert pipeline._check_index_built() == False
+
+
+class TestMappingPipeline_bowtieBuildIndex:
+
+    @patch('os.makedirs')
+    @patch('os.path.exists')
+    @patch('subprocess.run')
+    def test_bowtie_build_index_success(self, mock_subprocess_run, mock_path_exists, mock_makedirs, mock_proper_mapping_pipeline):
+        # Setup
+        mock_path_exists.return_value = False
+        mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="Success", stderr="")
+        pipeline = mock_proper_mapping_pipeline
+
+        # Execute
+        pipeline._bowtie_build_index(verbose=True)
+
+        # Verify
+        mock_path_exists.assert_called_once_with("/fake/dir/temp/ref_index/")
+        mock_makedirs.assert_called_once_with("/fake/dir/temp/ref_index")
+        mock_subprocess_run.assert_called_once_with(
+            [
+                "bowtie2-build",
+                "-f",
+                "/fake/dir/input/reference.fasta",
+                "/fake/dir/temp/ref_index/reference",
+            ],
+            capture_output=True,
+            text=True
         )
 
-        assert thr == expected_thr
-        assert pytest.approx(slope, 0.01) == expected_slope
-        assert pytest.approx(intercept, 0.01) == expected_intercept
-        assert pytest.approx(rvalue, 0.01) == expected_rvalue
+    @patch('os.makedirs')
+    @patch('os.path.exists')
+    @patch('subprocess.run')
+    def test_bowtie_build_index_failed(self, mock_subprocess_run, mock_path_exists, mock_makedirs, mock_proper_mapping_pipeline):
+        # Setup
+        mock_path_exists.return_value = False
+        mock_subprocess_run.return_value = MagicMock(returncode=1, stdout="", stderr="bowtie2 error")
+        pipeline = mock_proper_mapping_pipeline
 
-    def test_match_mappings_perfect_match(self):
-        ref_pos = pd.Series([0, 1000, 2000, 3000, 4000, 5000])
-        avg_pos = pd.Series([100, 1100, 2100, 3100, 4100, 5100])
-        expected_thr = 100
-        expected_slope = 1.0
-        expected_intercept = -100.0
-        expected_rvalue = 1.0
+        # Execute
+        with pytest.raises(Exception) as context:
+            pipeline._bowtie_build_index(verbose=True)
 
-        mapping_pipeline = MappingPipeline("test/testproject/", k=15)
-        thr, slope, intercept, rvalue = mapping_pipeline._match_mappings(
-            ref_pos, avg_pos
+        # Verify
+        mock_path_exists.assert_called_once_with("/fake/dir/temp/ref_index/")
+        mock_makedirs.assert_called_once_with("/fake/dir/temp/ref_index")
+        mock_subprocess_run.assert_called_once_with(
+            [
+                "bowtie2-build",
+                "-f",
+                "/fake/dir/input/reference.fasta",
+                "/fake/dir/temp/ref_index/reference",
+            ],
+            capture_output=True,
+            text=True
+        )
+        assert context.exconly()=="Exception: bowtie2 error"
+
+    @patch('os.path.exists')
+    @patch('subprocess.run')
+    def test_bowtie_build_index_directory_exists(self, mock_subprocess_run, mock_path_exists, mock_proper_mapping_pipeline):
+        # Setup
+        mock_path_exists.return_value = True
+        mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="Success", stderr="")
+        pipeline = mock_proper_mapping_pipeline
+
+        # Execute
+        pipeline._bowtie_build_index(verbose=True)
+
+        # Verify
+        mock_path_exists.assert_called_once_with("/fake/dir/temp/ref_index/")
+        mock_subprocess_run.assert_called_once_with(
+            [
+                "bowtie2-build",
+                "-f",
+                "/fake/dir/input/reference.fasta",
+                "/fake/dir/temp/ref_index/reference",
+            ],
+            capture_output=True,
+            text=True
         )
 
-        assert thr == expected_thr
-        assert pytest.approx(slope, 0.01) == expected_slope
-        assert pytest.approx(intercept, 0.01) == expected_intercept
-        assert pytest.approx(rvalue, 0.01) == expected_rvalue
 
-    def test_match_mappings_no_match(self):
-        ref_pos = pd.Series([0, 0, 0, 0, 4000, 5000], name="ref_pos")
-        avg_pos = pd.Series([100, 1100, 2100, 3100, 4100, 5100])
-        expected_thr = 0
-        expected_slope = 0.0
-        expected_intercept = 0.0
-        expected_rvalue = 0.0
+class TestMappingPipeline_bowtieMap:
 
-        mapping_pipeline = MappingPipeline("test/testproject/", k=15)
-        thr, slope, intercept, rvalue = mapping_pipeline._match_mappings(
-            ref_pos, avg_pos
+    @patch('subprocess.run')
+    def test_bowtie_map_success(self, mock_subprocess_run, mock_proper_mapping_pipeline):
+        # Setup
+        mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="Success", stderr="")
+        pipeline = mock_proper_mapping_pipeline
+
+        # Execute
+        pipeline._bowtie_map(verbose=True)
+
+        # Verify
+        mock_subprocess_run.assert_called_once_with(
+            [
+                "bowtie2",
+                "--norc",
+                "-a",
+                "-L",
+                "3",
+                "-x",
+                "/fake/dir/temp/ref_index/reference",
+                "-f",
+                "/fake/dir/temp/enriched_5mers.fasta",
+                "-S",
+                "/fake/dir/temp/enriched_5mers.sam",
+            ],
+            capture_output=True,
+            text=True
         )
 
-        assert thr == expected_thr
-        assert pytest.approx(slope, 0.01) == expected_slope
-        assert pytest.approx(intercept, 0.01) == expected_intercept
-        assert pytest.approx(rvalue, 0.01) == expected_rvalue
+    @patch('subprocess.run')
+    def test_bowtie_map_success(self, mock_subprocess_run, mock_proper_mapping_pipeline):
+        # Setup
+        mock_subprocess_run.return_value = MagicMock(returncode=1, stdout="", stderr="bowtie2 error")
+        pipeline = mock_proper_mapping_pipeline
 
-    @patch.object(MappingPipeline, "_read_sam_to_df")
-    @patch.object(MappingPipeline, "_get_kmer_pos")
-    def test_analyze_mapping(self, mock_get_kmer_pos, mock_read_sam_to_df):
-        # Mock the return values of the methods
-        mock_read_sam_to_df.return_value = pd.DataFrame(
-            {
-                "kmer": ["AAA", "CCC", "GGG"],
-                "flag": [0, 0, 0],
-                "ref_pos": [100, 200, 300],
-                "CIGAR": ["3M", "3M", "3M"],
-                "n_mismatch": [0, 1, 2],
-                "group": ["group1_enriched", "group2_enriched", "group1_enriched"],
-                "mutations": ["WT", "WT", "WT"],
-                "ref_pos_pred": [0.0, 0.0, 0.0],
-                "ref_pos_err": [
-                    0.0,
-                    0.0,
-                    0.0,
-                ],
-                "mapping_ok": [0,0,0]
-            }
-        ).set_index("kmer")
+        # Execute
+        with pytest.raises(Exception) as context:
+            pipeline._bowtie_map(verbose=True)
 
-        mock_get_kmer_pos.return_value = pd.DataFrame(
-            {
-                "group1_avg_pos": [150, 250, 350],
-                "group2_avg_pos": [160, 260, 360],
-                "total_avg_pos": [155, 255, 355],
-            },
-            index=["AAA", "CCC", "GGG"],
+        # Verify
+        mock_subprocess_run.assert_called_once_with(
+            [
+                "bowtie2",
+                "--norc",
+                "-a",
+                "-L",
+                "3",
+                "-x",
+                "/fake/dir/temp/ref_index/reference",
+                "-f",
+                "/fake/dir/temp/enriched_5mers.fasta",
+                "-S",
+                "/fake/dir/temp/enriched_5mers.sam",
+            ],
+            capture_output=True,
+            text=True
         )
-
-        # Call the method
-        mapping_pipeline = MappingPipeline("test/testproject/", k=15)
-        mapping_pipeline.analyze_mapping(verbose=True)
-
-        # Check if the matrices["mappings"] is set correctly
-        assert "mappings" in mapping_pipeline.matrices
-        mappings_df = mapping_pipeline.matrices["mappings"]
-        assert not mappings_df.empty
-        assert "mutations" in mappings_df.columns
-        assert mappings_df["mutations"].tolist() == ["WT", "WT", "WT"]
-        assert mappings_df["ref_pos_pred"].tolist() == [0.0, 0.0, 0.0]
+        assert context.exconly() == "Exception: bowtie2 error"
