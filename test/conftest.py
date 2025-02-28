@@ -1,4 +1,5 @@
 import pytest
+import numpy as np
 import pandas as pd
 from unittest.mock import patch, mock_open, MagicMock
 from portek.portek_map import MappingPipeline
@@ -41,3 +42,16 @@ def mock_proper_mapping_pipeline(
         mock_seqio_read.return_value.seq = "ATGC"
 
         return MappingPipeline("/fake/dir", 5)
+
+@pytest.fixture
+def actual_positions():
+    return {
+        "group1": {
+            "AAAAA": np.array([10, 20, 30]),
+            "CCCCC": np.array([15, 25, 35])
+        },
+        "group2": {
+            "GGGGG": np.array([5, 15, 25]),
+            "TTTTT": np.array([10, 20, 30])
+        }
+    }

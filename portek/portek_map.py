@@ -96,7 +96,6 @@ class MappingPipeline:
         )
         sample_list = []
         for filename in sample_list_in_path:
-            print(filename)
             with open(filename, mode="rb") as in_file:
                 partial_list = pickle.load(in_file)
             group = filename.stem.split("_")[0]
@@ -220,8 +219,9 @@ class MappingPipeline:
         ].astype(int)
         mappings_df["group"] = self.matrices["enriched"]["group"]
         mappings_df["mutations"] = "WT"
-        mappings_df["ref_pos_pred"] = 0.0
-        mappings_df["ref_pos_err"] = 0.0
+        mappings_df["pred_pos"] = 0.0
+        mappings_df["pred_err"] = 0.0
+        mappings_df["thr"] = 0
         mappings_df["mapping_ok"] = 0
         mappings_df["ref_pos"] = mappings_df["ref_pos"].apply(
             lambda pos: pos + 1 if pos > 0 else pos
@@ -229,91 +229,91 @@ class MappingPipeline:
         mappings_df["group"] = mappings_df["kmer"].apply(lambda kmer: self.matrices["enriched"].loc[kmer,"group"])
         return mappings_df
 
-    def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
-        ref_start = map_pos
-        aln_len = len(cigar)
-        ref_end = ref_start + aln_len
-        q_seq = [nuc for nuc in kmer]
-        t_seq = [nuc for nuc in ref_seq[ref_start:ref_end]]
-        ref_pos = []
-        curr_pos = ref_start - 1
-        for i, change in enumerate(cigar):
-            if change == "D":
-                curr_pos += 1
-                q_seq.insert(i, "-")
-                ref_pos.append(curr_pos)
-            elif change == "I":
-                t_seq.insert(i, "-")
-                ref_pos.append(curr_pos)
-            else:
-                curr_pos += 1
-                ref_pos.append(curr_pos)
+    # def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
+    #     ref_start = map_pos
+    #     aln_len = len(cigar)
+    #     ref_end = ref_start + aln_len
+    #     q_seq = [nuc for nuc in kmer]
+    #     t_seq = [nuc for nuc in ref_seq[ref_start:ref_end]]
+    #     ref_pos = []
+    #     curr_pos = ref_start - 1
+    #     for i, change in enumerate(cigar):
+    #         if change == "D":
+    #             curr_pos += 1
+    #             q_seq.insert(i, "-")
+    #             ref_pos.append(curr_pos)
+    #         elif change == "I":
+    #             t_seq.insert(i, "-")
+    #             ref_pos.append(curr_pos)
+    #         else:
+    #             curr_pos += 1
+    #             ref_pos.append(curr_pos)
 
-        q_seq = q_seq[:aln_len]
-        t_seq = t_seq[:aln_len]
-        return q_seq, t_seq, ref_pos
+    #     q_seq = q_seq[:aln_len]
+    #     t_seq = t_seq[:aln_len]
+    #     return q_seq, t_seq, ref_pos
 
-    def _join_indels(self, mutations: list):
-        subs = []
-        ins_pos = []
-        del_pos = []
+    # def _join_indels(self, mutations: list):
+    #     subs = []
+    #     ins_pos = []
+    #     del_pos = []
 
-        for mut in mutations:
-            if mut[1] == "ins":
-                ins_pos.append(mut[0])
-            elif mut[1] == "del":
-                del_pos.append(mut[0])
-            else:
-                subs.append(mut)
+    #     for mut in mutations:
+    #         if mut[1] == "ins":
+    #             ins_pos.append(mut[0])
+    #         elif mut[1] == "del":
+    #             del_pos.append(mut[0])
+    #         else:
+    #             subs.append(mut)
 
-        ins_pos = set(ins_pos)
-        inss = []
-        dels = []
+    #     ins_pos = set(ins_pos)
+    #     inss = []
+    #     dels = []
 
-        for start_pos in ins_pos:
-            muts = [
-                mut[2] for mut in mutations if mut[0] == start_pos and mut[1] == "ins"
-            ]
-            inss.append((start_pos, "ins", "".join(muts)))
+    #     for start_pos in ins_pos:
+    #         muts = [
+    #             mut[2] for mut in mutations if mut[0] == start_pos and mut[1] == "ins"
+    #         ]
+    #         inss.append((start_pos, "ins", "".join(muts)))
 
-        for k, g in itertools.groupby(
-            enumerate(sorted(del_pos)), lambda x: x[0] - x[1]
-        ):
-            del_group_pos = list(map(operator.itemgetter(1), g))
-            dels.append((del_group_pos[0], "del", del_group_pos[-1]))
+    #     for k, g in itertools.groupby(
+    #         enumerate(sorted(del_pos)), lambda x: x[0] - x[1]
+    #     ):
+    #         del_group_pos = list(map(operator.itemgetter(1), g))
+    #         dels.append((del_group_pos[0], "del", del_group_pos[-1]))
 
-        grouped_muts = subs + inss + dels
-        return grouped_muts
+    #     grouped_muts = subs + inss + dels
+    #     return grouped_muts
 
-    def _find_variants(self, ref_seq, kmer, map_pos, cigar) -> list:
-        mutations = []
-        q_seq, t_seq, ref_pos = self._align_seqs(ref_seq, kmer, map_pos, cigar)
-        if len(q_seq) != len(t_seq) != len(ref_pos):
-            raise ValueError(
-                f"Improper alingment of k-mer {q_seq} and reference {t_seq}"
-            )
-        for i in range(len(q_seq)):
-            if q_seq[i] != t_seq[i]:
-                if q_seq[i] == "-":
-                    mutations.append((ref_pos[i] + 1, "del", ref_pos[i] + 1))
-                elif t_seq[i] == "-":
-                    mutations.append((ref_pos[i] + 1, "ins", q_seq[i]))
-                else:
-                    mutations.append((ref_pos[i] + 1, t_seq[i], q_seq[i]))
+    # def _find_variants(self, ref_seq, kmer, map_pos, cigar) -> list:
+    #     mutations = []
+    #     q_seq, t_seq, ref_pos = self._align_seqs(ref_seq, kmer, map_pos, cigar)
+    #     if len(q_seq) != len(t_seq) != len(ref_pos):
+    #         raise ValueError(
+    #             f"Improper alingment of k-mer {q_seq} and reference {t_seq}"
+    #         )
+    #     for i in range(len(q_seq)):
+    #         if q_seq[i] != t_seq[i]:
+    #             if q_seq[i] == "-":
+    #                 mutations.append((ref_pos[i] + 1, "del", ref_pos[i] + 1))
+    #             elif t_seq[i] == "-":
+    #                 mutations.append((ref_pos[i] + 1, "ins", q_seq[i]))
+    #             else:
+    #                 mutations.append((ref_pos[i] + 1, t_seq[i], q_seq[i]))
 
-        mutations = self._join_indels(mutations)
-        return mutations
+    #     mutations = self._join_indels(mutations)
+    #     return mutations
 
-    def _mutation_tuple_to_text(self, mutation_as_tuple: tuple) -> str:
-        if mutation_as_tuple[1] == "del":
-            mutation_as_text = f"{mutation_as_tuple[0]}_{mutation_as_tuple[2]}del"
-        elif mutation_as_tuple[1] == "ins":
-            mutation_as_text = f"{mutation_as_tuple[0]}_{mutation_as_tuple[0]+1}ins{mutation_as_tuple[2]}"
-        else:
-            mutation_as_text = (
-                f"{mutation_as_tuple[0]}{mutation_as_tuple[1]}>{mutation_as_tuple[2]}"
-            )
-        return mutation_as_text
+    # def _mutation_tuple_to_text(self, mutation_as_tuple: tuple) -> str:
+    #     if mutation_as_tuple[1] == "del":
+    #         mutation_as_text = f"{mutation_as_tuple[0]}_{mutation_as_tuple[2]}del"
+    #     elif mutation_as_tuple[1] == "ins":
+    #         mutation_as_text = f"{mutation_as_tuple[0]}_{mutation_as_tuple[0]+1}ins{mutation_as_tuple[2]}"
+    #     else:
+    #         mutation_as_text = (
+    #             f"{mutation_as_tuple[0]}{mutation_as_tuple[1]}>{mutation_as_tuple[2]}"
+    #         )
+    #     return mutation_as_text
     
     def _load_kmer_pos(self, input_filename:pathlib.Path, kmers:np.ndarray, kmer_distros:dict, verbose: bool = False) -> None:
         with open(input_filename, mode="rb") as in_file:
@@ -323,19 +323,21 @@ class MappingPipeline:
         kmer_distros[group] = {kmer:positions for kmer, positions in temp_dict.items() if kmer in kmers}
 
     def _get_total_distros(self, kmer_distros:dict) -> None:
-        kmer_distros["conserved"] = {}
+        total_distros = {}
         for distros in kmer_distros.values():
             for kmer, distro in distros.items():
-                if kmer in kmer_distros["conserved"].keys():
-                    kmer_distros["conserved"][kmer].extend(distro)
+                if kmer in total_distros.keys():
+                    total_distros[kmer] = total_distros[kmer] + distro
                 else:
-                    kmer_distros["conserved"][kmer] = distro
+                    total_distros[kmer] = distro
+        kmer_distros["conserved"] = total_distros
+
     def _get_peaks_from_distro(self, kmer_distros:dict) -> dict:
         distro_peaks = {group:{} for group in kmer_distros.keys()}
         for group in distro_peaks.keys():
             for kmer, distro in kmer_distros[group].items():
                 max_pos = max(max(distro), len(self.ref_seq))
-                bins = max_pos
+                bins = max_pos+1
                 histogram_over_genome = histogram(distro, 0, max_pos, bins)
                 peaks = find_peaks(histogram_over_genome, distance=bins/10)
                 distro_peaks[group][kmer] = peaks[0]
@@ -366,36 +368,60 @@ class MappingPipeline:
         
     def _get_real_pos(self, group:str, kmer:str, ref_pos:int, actual_positions:dict) -> int:
         peaks = actual_positions[group][kmer]
-        diffs = peaks - ref_pos
+        diffs = abs(peaks - ref_pos)
         return peaks[np.argmin(diffs)]
     
-    def _predict_pos(self, ref_pos:pd.Series, real_pos:pd.Series, regress) -> tuple[pd.Series, pd.Series]:
+    def _predict_pos(self, real_pos:pd.Series, ref_pos:pd.Series, regress) -> tuple[pd.Series, pd.Series]:
         pred_pos = regress.slope*real_pos+regress.intercept
         pred_pos.name = "pred_pos"
-        pred_err = pred_pos-ref_pos
+        pred_err = abs(pred_pos-ref_pos)
         pred_err.name = "pred_err"
         return pred_pos, pred_err
     
-    def _tune_regress(self, ref_pos, real_pos) -> tuple[pd.Series, pd.Series]:
-        init_regress = linregress(ref_pos, real_pos)
-        _, init_err = self._predict_pos(ref_pos, real_pos, init_regress)
+    def _tune_regress(self, real_pos, ref_pos) -> tuple[pd.Series, pd.Series]:
+        init_regress = linregress(real_pos, ref_pos)
+        _, init_err = self._predict_pos(real_pos, ref_pos, init_regress)
+        thr_range = range(100, int(max(init_err)), 100)
+        if len(thr_range) == 0:
+            return init_regress, 100
         r2s = []
         regresses = []
-        for thr in range(100, int(max(init_err)), 100):
-            ref_pos_trim = ref_pos[abs(init_err)<thr]
-            real_pos_trim = real_pos[abs(init_err)<thr]
-            regress = linregress(ref_pos_trim, real_pos_trim)
+        for thr in thr_range:
+            ref_pos_trim = ref_pos[init_err<thr]
+            real_pos_trim = real_pos[init_err<thr]
+            if len(real_pos_trim) == 0:
+                print(f"Not enough {self.k}-mers after trimming at a threshold of {thr}, breaking.")
+                if len(r2s) == 0:
+                    return init_regress, 100
+                break
+            regress = linregress(real_pos_trim, ref_pos_trim)
+            pred, err = self._predict_pos(real_pos, ref_pos, regress)
+            regresses.append((regress,thr))
             r2s.append(regress.rvalue)
-            regresses.append(regress)
-            print(thr, regress.rvalue)
+        regresses.reverse()
+        r2s.reverse()
+        best_regress = regresses[r2s.index(max(r2s))]
+        best_thr = best_regress[1]
+        best_regress = best_regress[0]
+
+        return best_regress, best_thr
+         
 
     def _verify_mapping(self, mappings_df:pd.DataFrame, verbose:bool = False) -> None:
         for group in mappings_df["group"].unique():
             group_enriched_mappings = mappings_df[mappings_df["group"]==group].index
+            if len(group_enriched_mappings) < 4:
+                print(f"Not enough mapped {self.k}-mers in group {group}, skipping.")
+                continue
             ref_pos = mappings_df.loc[group_enriched_mappings, "ref_pos"]
             real_pos = mappings_df.loc[group_enriched_mappings, "real_pos"]
-            print(group)
-            self._tune_regress(ref_pos, real_pos)
+            regress, thr = self._tune_regress(real_pos, ref_pos)
+            pred_pos, pred_err = self._predict_pos(real_pos, ref_pos, regress)
+            mappings_df.loc[group_enriched_mappings, "pred_pos"] = pred_pos
+            mappings_df.loc[group_enriched_mappings, "pred_err"] = pred_err
+            mappings_df.loc[group_enriched_mappings, "thr"] = thr
+        mappings_df["mapping_ok"] = mappings_df.apply(lambda row: 1 if row["pred_err"]< row["thr"] else 0, axis=1)
+
 
     def analyze_mapping(self, verbose:bool = False):
         mappings_df = self._read_sam_to_df()
@@ -463,7 +489,7 @@ class MappingPipeline:
         print(f"\nSaving {self.k}-mer mappings.")
         df_to_save = self.matrices["mappings"].copy()
         df_to_save.index.name = "id"
-        df_to_save.sort_values("ref_pos", inplace=True)
+        df_to_save.sort_values("mapping_ok", inplace=True)
         df_to_save.to_csv(
             f"{self.project_dir}/output/enriched_{self.k}mers_mappings.csv"
         )
