@@ -14,7 +14,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pysam
-from scipy.stats import linregress, gaussian_kde
+import statsmodels.api as sm
 from scipy.ndimage import histogram
 from scipy.signal import find_peaks
 from Bio import SeqIO
@@ -195,6 +195,7 @@ class MappingPipeline:
             "ref_pos": [],
             "CIGAR": [],
             "n_mismatch": [],
+            "mapq":[]
         }
         for read in reads:
             read_dict["kmer"].append(read.query_name)
@@ -211,6 +212,7 @@ class MappingPipeline:
                 read_dict["n_mismatch"].append(read.get_tag("NM", False))
             else:
                 read_dict["n_mismatch"].append(0)
+            read_dict["mapq"].append(read.mapping_quality)
 
         mappings_df = pd.DataFrame(read_dict)
         mappings_df["CIGAR"] = mappings_df["CIGAR"].apply(self._parse_CIGAR)
@@ -222,7 +224,7 @@ class MappingPipeline:
         mappings_df["pred_pos"] = 0.0
         mappings_df["pred_err"] = 0.0
         mappings_df["thr"] = 0
-        mappings_df["mapping_ok"] = 0
+        mappings_df["mapping_ok"] = 1
         mappings_df["ref_pos"] = mappings_df["ref_pos"].apply(
             lambda pos: pos + 1 if pos > 0 else pos
         )
@@ -371,63 +373,78 @@ class MappingPipeline:
         diffs = abs(peaks - ref_pos)
         return peaks[np.argmin(diffs)]
     
-    def _predict_pos(self, real_pos:pd.Series, ref_pos:pd.Series, regress) -> tuple[pd.Series, pd.Series]:
-        pred_pos = regress.slope*real_pos+regress.intercept
+    def _get_n_peaks(self, group:str, kmer:str, ref_pos:int, actual_positions:dict) -> int:
+        peaks = actual_positions[group][kmer]
+        return len(peaks)
+    
+    def _predict_pos(self, real_pos:pd.Series, ref_pos:pd.Series, regress:pd.Series) -> tuple[pd.Series, pd.Series]:
+        pred_pos = regress["real_pos"]*real_pos+regress["const"]
         pred_pos.name = "pred_pos"
-        pred_err = abs(pred_pos-ref_pos)
+        pred_err = pred_pos-ref_pos
         pred_err.name = "pred_err"
         return pred_pos, pred_err
     
-    def _tune_regress(self, real_pos, ref_pos) -> tuple[pd.Series, pd.Series]:
-        init_regress = linregress(real_pos, ref_pos)
-        _, init_err = self._predict_pos(real_pos, ref_pos, init_regress)
-        thr_range = range(100, int(max(init_err)), 100)
-        if len(thr_range) == 0:
-            return init_regress, 100
-        r2s = []
-        regresses = []
-        for thr in thr_range:
-            ref_pos_trim = ref_pos[init_err<thr]
-            real_pos_trim = real_pos[init_err<thr]
-            if len(real_pos_trim) == 0:
-                print(f"Not enough {self.k}-mers after trimming at a threshold of {thr}, breaking.")
-                if len(r2s) == 0:
-                    return init_regress, 100
-                break
-            regress = linregress(real_pos_trim, ref_pos_trim)
-            pred, err = self._predict_pos(real_pos, ref_pos, regress)
-            regresses.append((regress,thr))
-            r2s.append(regress.rvalue)
-        regresses.reverse()
-        r2s.reverse()
-        best_regress = regresses[r2s.index(max(r2s))]
-        best_thr = best_regress[1]
-        best_regress = best_regress[0]
-
-        return best_regress, best_thr
+    def _tune_regress(self, real_pos: pd.Series, ref_pos:pd.Series) -> tuple[pd.Series, pd.Index]:        
+        real_pos_for_fit = sm.add_constant(real_pos)
+        regress = sm.OLS(ref_pos, real_pos_for_fit).fit()
+        outlier_df = regress.outlier_test()
+        outliers = outlier_df[outlier_df["unadj_p"] < 0.05].index
+        params = regress.params
+        if len(outliers) > 0:
+            trim_real_pos = real_pos_for_fit.drop(outliers)
+            trim_ref_pos = ref_pos.drop(outliers)
+            regress = sm.OLS(trim_ref_pos, trim_real_pos).fit()
+            params = regress.params
+        return params, outliers
          
 
     def _verify_mapping(self, mappings_df:pd.DataFrame, verbose:bool = False) -> None:
         for group in mappings_df["group"].unique():
             group_enriched_mappings = mappings_df[mappings_df["group"]==group].index
-            if len(group_enriched_mappings) < 4:
+            goor_for_fit = group_enriched_mappings[mappings_df.loc[group_enriched_mappings, "flag"] != 4]
+            if len(goor_for_fit) < 4:
                 print(f"Not enough mapped {self.k}-mers in group {group}, skipping.")
                 continue
+            ref_pos_for_fit = mappings_df.loc[goor_for_fit, "ref_pos"]
+            real_pos_for_fit = mappings_df.loc[goor_for_fit, "real_pos"]
+            regress, outliers = self._tune_regress(real_pos_for_fit, ref_pos_for_fit)
             ref_pos = mappings_df.loc[group_enriched_mappings, "ref_pos"]
             real_pos = mappings_df.loc[group_enriched_mappings, "real_pos"]
-            regress, thr = self._tune_regress(real_pos, ref_pos)
             pred_pos, pred_err = self._predict_pos(real_pos, ref_pos, regress)
             mappings_df.loc[group_enriched_mappings, "pred_pos"] = pred_pos
             mappings_df.loc[group_enriched_mappings, "pred_err"] = pred_err
+            if len(outliers) > 0:
+                thr = int(abs(mappings_df.loc[outliers, "pred_err"]).min()-1)
+                print(f"Found {len(outliers)} in group {group}, setting threshold {thr}.")
+            else:
+                thr = int(abs(mappings_df.loc[goor_for_fit, "pred_err"]).max()+1)
+                print(f"Found {len(outliers)} in group {group}, setting threshold {thr}.")
             mappings_df.loc[group_enriched_mappings, "thr"] = thr
-        mappings_df["mapping_ok"] = mappings_df.apply(lambda row: 1 if row["pred_err"]< row["thr"] else 0, axis=1)
+        mappings_df["mapping_ok"] = mappings_df.apply(lambda row: 1 if abs(row["pred_err"])< row["thr"] else 0, axis=1)
+
+
+    def _resolve_multiple_mappings(self, mappings_df:pd.DataFrame):
+        multimapped_kmers = mappings_df[mappings_df["flag"] == 256]["kmer"].values
+        bad_mappings = pd.Index([])
+        for kmer in multimapped_kmers:
+            kmer_sub_df = mappings_df.loc[mappings_df["kmer"] == kmer]
+            kmer_sub_df["pos_diff"] = abs(kmer_sub_df["ref_pos"]-kmer_sub_df["real_pos"])
+            kmer_sub_df.sort_values("pos_diff", inplace=True)
+            n_peaks = kmer_sub_df["n_peaks"].values[0]
+            bad_mappings = bad_mappings.union(kmer_sub_df.iloc[n_peaks:].index)
+                
+        print(f"Chujowe mapowanie. Wyjebać mapowania {bad_mappings}")
+
+        return bad_mappings
 
 
     def analyze_mapping(self, verbose:bool = False):
         mappings_df = self._read_sam_to_df()
         actual_positions = self._get_kmer_peaks(mappings_df, verbose)
         mappings_df["real_pos"] = mappings_df.apply(lambda row: self._get_real_pos(row["group"], row["kmer"], row["ref_pos"], actual_positions), axis=1)
-        self._verify_mapping(mappings_df, verbose)
+        mappings_df["n_peaks"] = mappings_df.apply(lambda row: self._get_n_peaks(row["group"], row["kmer"], row["ref_pos"], actual_positions), axis=1)
+        bad_mappings = self._resolve_multiple_mappings(mappings_df)
+        mappings_df.loc[bad_mappings,"mapping_ok"] = 0
         #     mappings_df.loc[group_enriched_kmres, "thr"] = thr
         #     mappings_df.loc[group_enriched_kmres, "ref_pos_pred"]  = slope * mappings_df.loc[group_enriched_kmres, avg_pos_col_name] + intercept
         #     mappings_df.loc[group_enriched_kmres, "ref_pos_err"] = mappings_df.loc[group_enriched_kmres, "ref_pos_pred"]-mappings_df.loc[group_enriched_kmres, "ref_pos"]

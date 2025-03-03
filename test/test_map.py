@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import unittest
 from unittest.mock import patch, mock_open, MagicMock
-from scipy.stats import linregress
+import statsmodels.api as sm
 from portek.portek_map import MappingPipeline
 
 
@@ -896,11 +896,13 @@ class TestMappinPipeline_predictPos:
         pipeline = mock_proper_mapping_pipeline
 
         ref_pos = pd.Series([11, 12, 13, 14, 15])
+        ref_pos.name = "ref_pos"
         real_pos = pd.Series([1, 2, 3, 4, 5])
-        regress = linregress(real_pos, ref_pos)
+        real_pos.name = "real_pos"
+        real_pos_for_fit = sm.add_constant(real_pos)
+        regress = sm.OLS(ref_pos, real_pos_for_fit).fit().params
 
         pred_pos, pred_err = pipeline._predict_pos(real_pos, ref_pos, regress)
-
         expected_pred_pos = pd.Series([11, 12, 13, 14, 15], name="pred_pos").astype(
             float
         )
@@ -911,50 +913,55 @@ class TestMappinPipeline_predictPos:
 
 
 class TestMappingPipeline_tuneRegress:
-    def test_tune_regress_success(self, mock_proper_mapping_pipeline):
+    def test_tune_regress_no_outliers(self, mock_proper_mapping_pipeline):
         ref_pos = pd.Series(
-            [11, 12, 13, 14, 15, 511, 512, 513, 514, 515, 1011, 1012, 53, 504, 1515]
+            [pos for pos in range(110,141)]
         )
+        ref_pos.name = "ref_pos"
         real_pos = pd.Series(
-            [1, 2, 3, 4, 5, 501, 502, 503, 504, 505, 1001, 1002, 1003, 1004, 1005]
+            [99,102,101,104,103,106,105,108,107,110,109,112,111,114,113,116,115,118,117,120,119,121,120,123,122,125,124,127,126,130,130]
         )
+        real_pos.name = "real_pos"
         pipeline = mock_proper_mapping_pipeline
-        regress, thr = pipeline._tune_regress(real_pos, ref_pos)
-        assert thr == 300
-        assert regress.slope == 1.0
-        assert regress.intercept == 10.0
+        params, outliers = pipeline._tune_regress(real_pos, ref_pos)
+        assert pytest.approx(params["const"],abs=5) == 10
+        assert pytest.approx(params["real_pos"],abs=1) == 1
+        assert len(outliers) == 0
 
-    def test_tune_regress_thr100(self, mock_proper_mapping_pipeline):
+    def test_tune_regress_big_outlier(self, mock_proper_mapping_pipeline):
         ref_pos = pd.Series(
-            [11, 12, 13, 14, 15, 511, 512, 513, 514, 515, 1011, 1012, 1213, 814, 1215]
+            [pos for pos in range(110,141)]
         )
+        ref_pos.name = "ref_pos"
         real_pos = pd.Series(
-            [1, 2, 3, 4, 5, 501, 502, 503, 504, 505, 1001, 1002, 1003, 1004, 1005]
+            [pos for pos in range(100,131)]
         )
+        real_pos.name = "real_pos"
+        real_pos[0] = 8000
+        real_pos[10] = 115
         pipeline = mock_proper_mapping_pipeline
-        regress, thr = pipeline._tune_regress(real_pos, ref_pos)
-        assert thr == 100
-        assert regress.slope == 1.0
-        assert regress.intercept == 10.0
-
-    def test_tune_regress_thrmax(self, mock_proper_mapping_pipeline):
+        params, outliers = pipeline._tune_regress(real_pos, ref_pos)
+        print(params, outliers)
+        assert len(outliers) == 1
+        assert pytest.approx(params["const"],abs=5) == 10
+        assert pytest.approx(params["real_pos"],abs=1) == 1
+    
+    def test_tune_regress_small_outlier(self, mock_proper_mapping_pipeline):
         ref_pos = pd.Series(
-            [11, 12, 13, 14, 15, 511, 512, 513, 514, 515, 1011, 1012, 1013, 1014, 2015]
+            [pos for pos in range(110,141)]
         )
+        ref_pos.name = "ref_pos"
         real_pos = pd.Series(
-            [1, 2, 3, 4, 5, 501, 502, 503, 504, 505, 1001, 1002, 1003, 1004, 1005]
+            [100,100,103,103,104,105,105,108,108,109,110,111,112,112,115,115,116,117,118,119,120,121,50,123,124,125,126,127,128,129,130]
         )
+        real_pos.name = "real_pos"
         pipeline = mock_proper_mapping_pipeline
-        regress, thr = pipeline._tune_regress(real_pos, ref_pos)
-        assert thr == 800
-        assert regress.slope == 1.0
-        assert regress.intercept == 10.0
+        params, outliers = pipeline._tune_regress(real_pos, ref_pos)
 
-    def test_tune_regress_exactmatch(self, mock_proper_mapping_pipeline):
-        ref_pos = pd.Series([11, 12, 13, 14, 15, 1011, 1012, 1013, 1014, 1015])
-        real_pos = pd.Series([1, 2, 3, 4, 5, 1001, 1002, 1003, 1004, 1005])
-        pipeline = mock_proper_mapping_pipeline
-        regress, thr = pipeline._tune_regress(real_pos, ref_pos)
-        assert thr == 100
-        assert regress.slope == 1.0
-        assert regress.intercept == 10.0
+        assert len(outliers) == 1
+        assert pytest.approx(params["const"],abs=5) == 10
+        assert pytest.approx(params["real_pos"],abs=1) == 1
+
+
+
+
