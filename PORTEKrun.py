@@ -45,13 +45,6 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "-rf",
-    help="Perform refernce free alignment",
-    default=False,
-    action="store_true",
-)
-
-parser.add_argument(
     "-n_jobs",
     help="Number of processes used in PORT-EK find and PORT-EK enriched (default 4)",
     default=4,

@@ -1,12 +1,9 @@
 import pytest
-import os
 import pathlib
 import pickle
 import pandas as pd
 import numpy as np
-import unittest
 from unittest.mock import patch, mock_open, MagicMock
-import statsmodels.api as sm
 from portek.portek_map import MappingPipeline
 
 
