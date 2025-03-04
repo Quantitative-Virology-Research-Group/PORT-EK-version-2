@@ -195,7 +195,7 @@ class MappingPipeline:
             "ref_pos": [],
             "CIGAR": [],
             "n_mismatch": [],
-            "mapq":[]
+            "score":[]
         }
         for read in reads:
             read_dict["kmer"].append(read.query_name)
@@ -212,7 +212,7 @@ class MappingPipeline:
                 read_dict["n_mismatch"].append(read.get_tag("NM", False))
             else:
                 read_dict["n_mismatch"].append(0)
-            read_dict["mapq"].append(read.mapping_quality)
+            read_dict["score"].append(read.get_tag("AS", False))
 
         mappings_df = pd.DataFrame(read_dict)
         mappings_df["CIGAR"] = mappings_df["CIGAR"].apply(self._parse_CIGAR)
@@ -231,91 +231,91 @@ class MappingPipeline:
         mappings_df["group"] = mappings_df["kmer"].apply(lambda kmer: self.matrices["enriched"].loc[kmer,"group"])
         return mappings_df
 
-    # def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
-    #     ref_start = map_pos
-    #     aln_len = len(cigar)
-    #     ref_end = ref_start + aln_len
-    #     q_seq = [nuc for nuc in kmer]
-    #     t_seq = [nuc for nuc in ref_seq[ref_start:ref_end]]
-    #     ref_pos = []
-    #     curr_pos = ref_start - 1
-    #     for i, change in enumerate(cigar):
-    #         if change == "D":
-    #             curr_pos += 1
-    #             q_seq.insert(i, "-")
-    #             ref_pos.append(curr_pos)
-    #         elif change == "I":
-    #             t_seq.insert(i, "-")
-    #             ref_pos.append(curr_pos)
-    #         else:
-    #             curr_pos += 1
-    #             ref_pos.append(curr_pos)
+    def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
+        ref_start = map_pos-1
+        aln_len = len(cigar)
+        ref_end = ref_start + aln_len
+        q_seq = [nuc for nuc in kmer]
+        t_seq = [nuc for nuc in ref_seq[ref_start:ref_end]]
+        ref_pos = []
+        curr_pos = ref_start - 1
+        for i, change in enumerate(cigar):
+            if change == "D":
+                curr_pos += 1
+                q_seq.insert(i, "-")
+                ref_pos.append(curr_pos)
+            elif change == "I":
+                t_seq.insert(i, "-")
+                ref_pos.append(curr_pos)
+            else:
+                curr_pos += 1
+                ref_pos.append(curr_pos)
 
-    #     q_seq = q_seq[:aln_len]
-    #     t_seq = t_seq[:aln_len]
-    #     return q_seq, t_seq, ref_pos
+        q_seq = q_seq[:aln_len]
+        t_seq = t_seq[:aln_len]
+        return q_seq, t_seq, ref_pos
 
-    # def _join_indels(self, mutations: list):
-    #     subs = []
-    #     ins_pos = []
-    #     del_pos = []
+    def _join_indels(self, mutations: list):
+        subs = []
+        ins_pos = []
+        del_pos = []
 
-    #     for mut in mutations:
-    #         if mut[1] == "ins":
-    #             ins_pos.append(mut[0])
-    #         elif mut[1] == "del":
-    #             del_pos.append(mut[0])
-    #         else:
-    #             subs.append(mut)
+        for mut in mutations:
+            if mut[1] == "ins":
+                ins_pos.append(mut[0])
+            elif mut[1] == "del":
+                del_pos.append(mut[0])
+            else:
+                subs.append(mut)
 
-    #     ins_pos = set(ins_pos)
-    #     inss = []
-    #     dels = []
+        ins_pos = set(ins_pos)
+        inss = []
+        dels = []
 
-    #     for start_pos in ins_pos:
-    #         muts = [
-    #             mut[2] for mut in mutations if mut[0] == start_pos and mut[1] == "ins"
-    #         ]
-    #         inss.append((start_pos, "ins", "".join(muts)))
+        for start_pos in ins_pos:
+            muts = [
+                mut[2] for mut in mutations if mut[0] == start_pos and mut[1] == "ins"
+            ]
+            inss.append((start_pos, "ins", "".join(muts)))
 
-    #     for k, g in itertools.groupby(
-    #         enumerate(sorted(del_pos)), lambda x: x[0] - x[1]
-    #     ):
-    #         del_group_pos = list(map(operator.itemgetter(1), g))
-    #         dels.append((del_group_pos[0], "del", del_group_pos[-1]))
+        for k, g in itertools.groupby(
+            enumerate(sorted(del_pos)), lambda x: x[0] - x[1]
+        ):
+            del_group_pos = list(map(operator.itemgetter(1), g))
+            dels.append((del_group_pos[0], "del", del_group_pos[-1]))
 
-    #     grouped_muts = subs + inss + dels
-    #     return grouped_muts
+        grouped_muts = subs + inss + dels
+        return grouped_muts
 
-    # def _find_variants(self, ref_seq, kmer, map_pos, cigar) -> list:
-    #     mutations = []
-    #     q_seq, t_seq, ref_pos = self._align_seqs(ref_seq, kmer, map_pos, cigar)
-    #     if len(q_seq) != len(t_seq) != len(ref_pos):
-    #         raise ValueError(
-    #             f"Improper alingment of k-mer {q_seq} and reference {t_seq}"
-    #         )
-    #     for i in range(len(q_seq)):
-    #         if q_seq[i] != t_seq[i]:
-    #             if q_seq[i] == "-":
-    #                 mutations.append((ref_pos[i] + 1, "del", ref_pos[i] + 1))
-    #             elif t_seq[i] == "-":
-    #                 mutations.append((ref_pos[i] + 1, "ins", q_seq[i]))
-    #             else:
-    #                 mutations.append((ref_pos[i] + 1, t_seq[i], q_seq[i]))
+    def _find_variants(self, ref_seq, kmer, map_pos, cigar) -> list:
+        mutations = []
+        q_seq, t_seq, ref_pos = self._align_seqs(ref_seq, kmer, map_pos, cigar)
+        if len(q_seq) != len(t_seq) != len(ref_pos):
+            raise ValueError(
+                f"Improper alingment of k-mer {q_seq} and reference {t_seq}"
+            )
+        for i in range(len(q_seq)):
+            if q_seq[i] != t_seq[i]:
+                if q_seq[i] == "-":
+                    mutations.append((ref_pos[i] + 1, "del", ref_pos[i] + 1))
+                elif t_seq[i] == "-":
+                    mutations.append((ref_pos[i] + 1, "ins", q_seq[i]))
+                else:
+                    mutations.append((ref_pos[i] + 1, t_seq[i], q_seq[i]))
 
-    #     mutations = self._join_indels(mutations)
-    #     return mutations
+        mutations = self._join_indels(mutations)
+        return mutations
 
-    # def _mutation_tuple_to_text(self, mutation_as_tuple: tuple) -> str:
-    #     if mutation_as_tuple[1] == "del":
-    #         mutation_as_text = f"{mutation_as_tuple[0]}_{mutation_as_tuple[2]}del"
-    #     elif mutation_as_tuple[1] == "ins":
-    #         mutation_as_text = f"{mutation_as_tuple[0]}_{mutation_as_tuple[0]+1}ins{mutation_as_tuple[2]}"
-    #     else:
-    #         mutation_as_text = (
-    #             f"{mutation_as_tuple[0]}{mutation_as_tuple[1]}>{mutation_as_tuple[2]}"
-    #         )
-    #     return mutation_as_text
+    def _mutation_tuple_to_text(self, mutation_as_tuple: tuple) -> str:
+        if mutation_as_tuple[1] == "del":
+            mutation_as_text = f"{mutation_as_tuple[0]}_{mutation_as_tuple[2]}del"
+        elif mutation_as_tuple[1] == "ins":
+            mutation_as_text = f"{mutation_as_tuple[0]}_{mutation_as_tuple[0]+1}ins{mutation_as_tuple[2]}"
+        else:
+            mutation_as_text = (
+                f"{mutation_as_tuple[0]}{mutation_as_tuple[1]}>{mutation_as_tuple[2]}"
+            )
+        return mutation_as_text
     
     def _load_kmer_pos(self, input_filename:pathlib.Path, kmers:np.ndarray, kmer_distros:dict, verbose: bool = False) -> None:
         with open(input_filename, mode="rb") as in_file:
@@ -427,9 +427,9 @@ class MappingPipeline:
         multimapped_kmers = mappings_df[mappings_df["flag"] == 256]["kmer"].values
         bad_mappings = pd.Index([])
         for kmer in multimapped_kmers:
-            kmer_sub_df = mappings_df.loc[mappings_df["kmer"] == kmer]
+            kmer_sub_df = mappings_df.loc[mappings_df["kmer"] == kmer].copy()
             kmer_sub_df["pos_diff"] = abs(kmer_sub_df["ref_pos"]-kmer_sub_df["real_pos"])
-            kmer_sub_df.sort_values("pos_diff", inplace=True)
+            kmer_sub_df.sort_values(["score", "pos_diff"], ascending=[False,True], inplace=True)
             n_peaks = kmer_sub_df["n_peaks"].values[0]
             bad_mappings = bad_mappings.union(kmer_sub_df.iloc[n_peaks:].index)
                 
@@ -460,36 +460,32 @@ class MappingPipeline:
         # properly_mapped.hist("ref_pos", by="group",bins=100)
         # plt.tight_layout()
         # plt.savefig(f"{self.project_dir}/temp/hist.svg", format="svg", dpi=300)
-        # mutations_dict = {}
-        # for row in mappings_df.itertuples():
-        #     if self._detect_unmapped_CIGAR(row.CIGAR) == True:
-        #         mappings_df.loc[row.Index, ["ref_pos", "n_mismatch"]] = 0
-        #         mappings_df.loc[row.Index, "mutations"] = "NA"
-        #         mappings_df.loc[row.Index, "flag"] = 4
-        #     elif row.n_mismatch > 0:
-        #         mutations_as_tuples = self._find_variants(
-        #             self.ref_seq, row.kmer, row.ref_pos, row.CIGAR
-        #         )
-        #         mappings_df.loc[row.Index, "mutations"] = "; ".join(
-        #             [self._mutation_tuple_to_text(mut) for mut in mutations_as_tuples]
-        #         )
-        #         for mutation in mutations_as_tuples:
-        #             mutation_text = self._mutation_tuple_to_text(mutation)
-        #             if mutation_text not in mutations_dict.keys():
-        #                 mutations_dict[mutation_text] = [row.kmer]
-        #             else:
-        #                 mutations_dict[mutation_text].append(row.kmer)
+        mutations_dict = {}
+        for row in mappings_df.itertuples():
+            if row.n_mismatch > 0:
+                mutations_as_tuples = self._find_variants(
+                    self.ref_seq, row.kmer, row.ref_pos, row.CIGAR
+                )
+                mappings_df.loc[row.Index, "mutations"] = "; ".join(
+                    [self._mutation_tuple_to_text(mut) for mut in mutations_as_tuples]
+                )
+                for mutation in mutations_as_tuples:
+                    mutation_text = self._mutation_tuple_to_text(mutation)
+                    if mutation_text not in mutations_dict.keys():
+                        mutations_dict[mutation_text] = [row.kmer]
+                    else:
+                        mutations_dict[mutation_text].append(row.kmer)
 
-        # num_kmers = len(self.matrices["enriched"])
-        # num_primary_mappings = len(mappings_df[mappings_df["flag"] == 0])
-        # num_secondary_mappings = len(mappings_df[mappings_df["flag"] == 256])
-        # num_unmapped = len(mappings_df[mappings_df["flag"] == 4])
+        num_kmers = len(self.matrices["enriched"])
+        num_primary_mappings = len(mappings_df[mappings_df["flag"] == 0])
+        num_secondary_mappings = len(mappings_df[mappings_df["flag"] == 256])
+        num_unmapped = len(mappings_df[mappings_df["flag"] == 4])
 
-        # if verbose == True:
-        #     print(
-        #         f"\nMapping of {num_kmers} {self.k}-mers resulted in {num_primary_mappings} primary mappings and {num_secondary_mappings} secondary mappings."
-        #     )
-        #     print(f"{num_unmapped} {self.k}-mers couldn't be mapped.")
+        if verbose == True:
+            print(
+                f"\nMapping of {num_kmers} {self.k}-mers resulted in {num_primary_mappings} primary mappings and {num_secondary_mappings} secondary mappings."
+            )
+            print(f"{num_unmapped} {self.k}-mers couldn't be mapped.")
         self.matrices["mappings"] = mappings_df
         # return mutations_dict
 
@@ -506,7 +502,7 @@ class MappingPipeline:
         print(f"\nSaving {self.k}-mer mappings.")
         df_to_save = self.matrices["mappings"].copy()
         df_to_save.index.name = "id"
-        df_to_save.sort_values("mapping_ok", inplace=True)
+        df_to_save.sort_values("ref_pos", inplace=True)
         df_to_save.to_csv(
             f"{self.project_dir}/output/enriched_{self.k}mers_mappings.csv"
         )
