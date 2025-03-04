@@ -124,7 +124,9 @@ def main():
         mapping_pipeline.run_mapping(verbose=args.verbose)
         mapping_pipeline.analyze_mapping(verbose=args.verbose)
         mapping_pipeline.save_mappings_df()
-
+        end_timeS_ARE_NOT_CANON = datetime.now()
+        running_time = end_timeS_ARE_NOT_CANON - start_time
+        print(f"\nTotal running time: {running_time}")
     elif args.tool == "classify":
         pass
 

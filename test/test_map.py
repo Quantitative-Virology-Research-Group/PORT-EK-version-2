@@ -473,33 +473,289 @@ class TestMappingPipelineRunMapping:
 
 class TestMappingPipeline_parseCIGAR:
 
-    def test_parse_CIGAR_success(
-        self,
-    ):
-        assert False
+    def test_parse_CIGAR(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
 
-    def test_parse_CIGAR_empty(
-        self,
-    ):
-        assert False
+        # Test case 1: Simple CIGAR string
+        cigar_string = "10M"
+        expected_output = ["M"] * 10
+        assert pipeline._parse_CIGAR(cigar_string) == expected_output
+
+        # Test case 2: CIGAR string with multiple operations
+        cigar_string = "5M3I2D4M"
+        expected_output = ["M"] * 5 + ["I"] * 3 + ["D"] * 2 + ["M"] * 4
+        assert pipeline._parse_CIGAR(cigar_string) == expected_output
+
+        # Test case 3: CIGAR string with all operations
+        cigar_string = "2M1I1D2M"
+        expected_output = ["M"] * 2 + ["I"] * 1 + ["D"] * 1 + ["M"] * 2
+        assert pipeline._parse_CIGAR(cigar_string) == expected_output
+
+        # Test case 4: Empty CIGAR string
+        cigar_string = ""
+        expected_output = []
+        assert pipeline._parse_CIGAR(cigar_string) == expected_output
+
+        # Test case 5: CIGAR string with large numbers
+        cigar_string = "100M50I25D"
+        expected_output = ["M"] * 100 + ["I"] * 50 + ["D"] * 25
+        assert pipeline._parse_CIGAR(cigar_string) == expected_output
 
 
 class TestMappingPipeline_readSAMToDf:
 
+    @patch("pysam.AlignmentFile")
     def test_read_sam_to_df_success(
-        self,
+        self, mock_alignment_file, mock_proper_mapping_pipeline
     ):
-        assert False
+        # Setup
+        mock_read = MagicMock()
+        mock_read.query_name = "AAAAA"
+        mock_read.flag = 0
+        mock_read.reference_start = 10
+        mock_read.cigarstring = "10M"
+        mock_read.get_tag.side_effect = lambda tag, _: {"NM": 1, "AS": 30}.get(
+            tag, None
+        )
+        mock_alignment_file.return_value.__iter__.return_value = [mock_read]
 
-    def test_read_sam_to_df_no_file(
-        self,
-    ):
-        assert False
+        pipeline = mock_proper_mapping_pipeline
 
-    def test_read_sam_to_df_wrong_format(
-        self,
+        # Execute
+        df = pipeline._read_sam_to_df()
+
+        # Verify
+        expected_df = pd.DataFrame(
+            {
+                "kmer": ["AAAAA"],
+                "flag": [0],
+                "ref_pos": [11],
+                "CIGAR": [["M"] * 10],
+                "n_mismatch": [1],
+                "score": [30],
+                "group": ["group1"],
+                "mutations": ["WT"],
+                "mapping_ok": [1],
+            }
+        )
+        pd.testing.assert_frame_equal(df, expected_df)
+
+    @patch("pysam.AlignmentFile")
+    def test_read_sam_to_df_no_aln(
+        self, mock_alignment_file, mock_proper_mapping_pipeline
     ):
-        assert False
+        # Setup
+        mock_read = MagicMock()
+        mock_read.query_name = "AAAAA"
+        mock_read.flag = 4
+        mock_read.reference_start = -1
+        mock_read.cigarstring = None
+        mock_read.has_tag.return_value = False
+        mock_alignment_file.return_value.__iter__.return_value = [mock_read]
+
+        pipeline = mock_proper_mapping_pipeline
+
+        # Execute
+        df = pipeline._read_sam_to_df()
+
+        # Verify
+        expected_df = pd.DataFrame(
+            {
+                "kmer": ["AAAAA"],
+                "flag": [4],
+                "ref_pos": [0],
+                "CIGAR": [[]],
+                "n_mismatch": [0],
+                "score": [-30],
+                "group": ["group1"],
+                "mutations": ["WT"],
+                "mapping_ok": [1],
+            }
+        )
+        pd.testing.assert_frame_equal(df, expected_df)
+
+
+class TestMappingPipeline_alingSeqs:
+    def test_align_seqs_simple(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        ref_seq = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAG"
+        kmer = "CGTAC"
+        map_pos = 3
+        cigar = ["M", "M", "M", "M", "M"]
+
+        q_seq, t_seq, ref_pos = pipeline._align_seqs(ref_seq, kmer, map_pos, cigar)
+
+        assert q_seq == list("CGTAC")
+        assert t_seq == list("CGTAC")
+        assert ref_pos == [3, 4, 5, 6, 7]
+
+    def test_align_seqs_with_deletion(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        ref_seq = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAG"
+        kmer = "CGACG"
+        map_pos = 3
+        cigar = ["M", "M", "D", "M", "M", "M"]
+
+        q_seq, t_seq, ref_pos = pipeline._align_seqs(ref_seq, kmer, map_pos, cigar)
+
+        assert q_seq == list("CG-ACG")
+        assert t_seq == list("CGTACG")
+        assert ref_pos == [3, 4, 5, 6, 7, 8]
+
+    def test_align_seqs_with_insertion(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        ref_seq = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAG"
+        kmer = "CGTTA"
+        map_pos = 3
+        cigar = ["M", "M", "I", "M", "M"]
+
+        q_seq, t_seq, ref_pos = pipeline._align_seqs(ref_seq, kmer, map_pos, cigar)
+
+        assert q_seq == list("CGTTA")
+        assert t_seq == list("CG-TA")
+        assert ref_pos == [3, 4, 4, 5, 6]
+
+    def test_align_seqs_with_complex_operations(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        ref_seq = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAG"
+        kmer = "CTAAC"
+        map_pos = 3
+        cigar = ["M", "D", "M", "I", "M", "M"]
+
+        q_seq, t_seq, ref_pos = pipeline._align_seqs(ref_seq, kmer, map_pos, cigar)
+
+        assert q_seq == list("C-TAAC")
+        assert t_seq == list("CGT-AC")
+        assert ref_pos == [3, 4, 5, 5, 6, 7]
+
+
+class TestMappingPipeline_joinIndels:
+
+    def test_join_indels_empty(self, mock_proper_mapping_pipeline):
+        mutations = []
+        result = mock_proper_mapping_pipeline._join_indels(mutations)
+        assert result == []
+
+    def test_join_indels_substitutions_only(self, mock_proper_mapping_pipeline):
+        mutations = [(10, "A", "T"), (20, "G", "C")]
+        result = mock_proper_mapping_pipeline._join_indels(mutations)
+        assert result == [(10, "A", "T"), (20, "G", "C")]
+
+    def test_join_indels_insertions_only(self, mock_proper_mapping_pipeline):
+        mutations = [(10, "ins", "A"), (10, "ins", "T"), (20, "ins", "G")]
+        result = mock_proper_mapping_pipeline._join_indels(mutations)
+        assert result == [(10, "ins", "AT"), (20, "ins", "G")]
+
+    def test_join_indels_deletions_only(self, mock_proper_mapping_pipeline):
+        mutations = [(10, "del", 10), (11, "del", 11), (20, "del", 20)]
+        result = mock_proper_mapping_pipeline._join_indels(mutations)
+        assert result == [(10, "del", 11), (20, "del", 20)]
+
+    def test_join_indels_mixed(self, mock_proper_mapping_pipeline):
+        mutations = [
+            (10, "A", "T"),
+            (15, "ins", "A"),
+            (15, "ins", "T"),
+            (20, "del", 20),
+            (21, "del", 21),
+        ]
+        result = mock_proper_mapping_pipeline._join_indels(mutations)
+        assert result == [(10, "A", "T"), (15, "ins", "AT"), (20, "del", 21)]
+
+    def test_join_indels_complex(self, mock_proper_mapping_pipeline):
+        mutations = [
+            (10, "A", "T"),
+            (15, "ins", "A"),
+            (15, "ins", "T"),
+            (20, "del", 20),
+            (21, "del", 21),
+            (25, "ins", "G"),
+            (25, "ins", "C"),
+            (30, "del", 30),
+            (31, "del", 31),
+            (32, "G", "A"),
+        ]
+        result = mock_proper_mapping_pipeline._join_indels(mutations)
+        assert result == [
+            (10, "A", "T"),
+            (15, "ins", "AT"),
+            (20, "del", 21),
+            (25, "ins", "GC"),
+            (30, "del", 31),
+            (32, "G", "A"),
+        ]
+
+
+class TestMappingPipeline_findVariants:
+    def test_find_variants_no_mutations(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        ref_seq = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAG"
+        kmer = "CGTAC"
+        map_pos = 4
+        cigar = ["M", "M", "M", "M", "M"]
+
+        mutations = pipeline._find_variants(ref_seq, kmer, map_pos, cigar)
+        assert mutations == []
+
+    def test_find_variants_with_substitution(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        ref_seq = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAG"
+        kmer = "CGTTC"
+        map_pos = 4
+        cigar = ["M", "M", "M", "M", "M"]
+
+        mutations = pipeline._find_variants(ref_seq, kmer, map_pos, cigar)
+        assert mutations == [(7, "A", "T")]
+
+    def test_find_variants_with_deletion(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        ref_seq = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAG"
+        kmer = "CGACG"
+        map_pos = 4
+        cigar = ["M", "M", "D", "M", "M", "M"]
+
+        mutations = pipeline._find_variants(ref_seq, kmer, map_pos, cigar)
+        assert mutations == [(6, "del", 6)]
+
+    def test_find_variants_with_insertion(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        ref_seq = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAG"
+        kmer = "CGTTA"
+        map_pos = 4
+        cigar = ["M", "M", "I", "M", "M"]
+
+        mutations = pipeline._find_variants(ref_seq, kmer, map_pos, cigar)
+        assert mutations == [(5, "ins", "T")]
+
+    def test_find_variants_with_complex_operations(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        ref_seq = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAG"
+        kmer = "CTAAG"
+        map_pos = 4
+        cigar = ["M", "D", "M", "M", "M", "M"]
+
+        mutations = pipeline._find_variants(ref_seq, kmer, map_pos, cigar)
+        assert mutations == [(5, "del", 5), (8, "C", "A")]
+
+
+class TestMappingPipeline_mutationTupleToText:
+    def test_mutation_tuple_to_text_deletion(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        mutation_tuple = (10, "del", 15)
+        result = pipeline._mutation_tuple_to_text(mutation_tuple)
+        assert result == "10_15del"
+
+    def test_mutation_tuple_to_text_insertion(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        mutation_tuple = (10, "ins", "A")
+        result = pipeline._mutation_tuple_to_text(mutation_tuple)
+        assert result == "10_11insA"
+
+    def test_mutation_tuple_to_text_substitution(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        mutation_tuple = (10, "A", "T")
+        result = pipeline._mutation_tuple_to_text(mutation_tuple)
+        assert result == "10A>T"
 
 
 class TestMappingPipeline_loadKmerPos:
@@ -807,6 +1063,7 @@ class TestMappingPipeline_getPeaksFromDistro:
 
 
 class TestMappingPipeline_getKmerPeaks:
+
     def test_get_kmer_peaks(self, mock_proper_mapping_pipeline):
         # Setup
         data = {
@@ -846,6 +1103,7 @@ class TestMappingPipeline_getKmerPeaks:
 
 
 class TestMappingPipeline_getRealPos:
+
     def test_get_real_pos_exact_match(
         self, mock_proper_mapping_pipeline, actual_positions
     ):
@@ -891,77 +1149,501 @@ class TestMappingPipeline_getRealPos:
         assert result2 == 20
 
 
-class TestMappinPipeline_predictPos:
-    def test_predict_pos(self, mock_proper_mapping_pipeline):
+class TestMappingPipeline_getNPeaks:
+    def test_get_n_peaks_single_peak(self, mock_proper_mapping_pipeline):
+        actual_positions = {"group1": {"AAAAA": [10]}}
+        pipeline = mock_proper_mapping_pipeline
+        result = pipeline._get_n_peaks("group1", "AAAAA", 10, actual_positions)
+        assert result == 1
+
+    def test_get_n_peaks_multiple_peaks(self, mock_proper_mapping_pipeline):
+        actual_positions = {"group1": {"AAAAA": [10, 20, 30]}}
+        pipeline = mock_proper_mapping_pipeline
+        result = pipeline._get_n_peaks("group1", "AAAAA", 10, actual_positions)
+        assert result == 3
+
+    def test_get_n_peaks_no_peaks(self, mock_proper_mapping_pipeline):
+        actual_positions = {"group1": {"AAAAA": []}}
+        pipeline = mock_proper_mapping_pipeline
+        result = pipeline._get_n_peaks("group1", "AAAAA", 10, actual_positions)
+        assert result == 0
+
+
+class TestMappingPipeline_resolveMultipleMappings:
+
+    def test_resolve_multiple_mappings_single_mapping(
+        self, mock_proper_mapping_pipeline
+    ):
+        # Setup
+        data = {
+            "kmer": ["AAAAA", "TTTTT"],
+            "flag": [0, 0],
+            "ref_pos": [10, 20],
+            "score": [0, 0],
+            "real_pos": [10, 20],
+            "n_peaks": [1, 1],
+            "mapping_ok": [1, 1],
+        }
+        mappings_df = pd.DataFrame(data)
         pipeline = mock_proper_mapping_pipeline
 
-        ref_pos = pd.Series([11, 12, 13, 14, 15])
-        ref_pos.name = "ref_pos"
-        real_pos = pd.Series([1, 2, 3, 4, 5])
-        real_pos.name = "real_pos"
-        real_pos_for_fit = sm.add_constant(real_pos)
-        regress = sm.OLS(ref_pos, real_pos_for_fit).fit().params
+        # Execute
+        bad_mappings = pipeline._resolve_multiple_mappings(mappings_df)
 
-        pred_pos, pred_err = pipeline._predict_pos(real_pos, ref_pos, regress)
-        expected_pred_pos = pd.Series([11, 12, 13, 14, 15], name="pred_pos").astype(
-            float
-        )
-        expected_pred_err = pd.Series([0, 0, 0, 0, 0], name="pred_err").astype(float)
+        # Verify
+        assert bad_mappings.empty
 
-        pd.testing.assert_series_equal(pred_pos, expected_pred_pos)
-        pd.testing.assert_series_equal(pred_err, expected_pred_err)
-
-
-class TestMappingPipeline_tuneRegress:
-    def test_tune_regress_no_outliers(self, mock_proper_mapping_pipeline):
-        ref_pos = pd.Series(
-            [pos for pos in range(110,141)]
-        )
-        ref_pos.name = "ref_pos"
-        real_pos = pd.Series(
-            [99,102,101,104,103,106,105,108,107,110,109,112,111,114,113,116,115,118,117,120,119,121,120,123,122,125,124,127,126,130,130]
-        )
-        real_pos.name = "real_pos"
+    def test_resolve_multiple_mappings_multiple_mappings(
+        self, mock_proper_mapping_pipeline
+    ):
+        # Setup
+        data = {
+            "kmer": ["AAAAA", "AAAAA", "TTTTT", "TTTTT"],
+            "flag": [0, 256, 0, 256],
+            "ref_pos": [10, 15, 20, 25],
+            "score": [0, -6, 0, 0],
+            "real_pos": [10, 10, 25, 25],
+            "n_peaks": [1, 1, 1, 1],
+            "mapping_ok": [1, 1, 1, 1],
+        }
+        mappings_df = pd.DataFrame(data)
         pipeline = mock_proper_mapping_pipeline
-        params, outliers = pipeline._tune_regress(real_pos, ref_pos)
-        assert pytest.approx(params["const"],abs=5) == 10
-        assert pytest.approx(params["real_pos"],abs=1) == 1
-        assert len(outliers) == 0
 
-    def test_tune_regress_big_outlier(self, mock_proper_mapping_pipeline):
-        ref_pos = pd.Series(
-            [pos for pos in range(110,141)]
-        )
-        ref_pos.name = "ref_pos"
-        real_pos = pd.Series(
-            [pos for pos in range(100,131)]
-        )
-        real_pos.name = "real_pos"
-        real_pos[0] = 8000
-        real_pos[10] = 115
+        # Execute
+        bad_mappings = pipeline._resolve_multiple_mappings(mappings_df)
+
+        # Verify
+        assert len(bad_mappings) == 2
+        assert bad_mappings.equals(pd.Index([1, 2]))
+
+    def test_resolve_multiple_mappings_equal(self, mock_proper_mapping_pipeline):
+        # Setup
+        data = {
+            "kmer": ["AAAAA", "AAAAA", "TTTTT", "TTTTT"],
+            "flag": [0, 256, 0, 256],
+            "ref_pos": [10, 15, 20, 25],
+            "score": [30, 30, 40, 40],
+            "real_pos": [10, 15, 20, 25],
+            "n_peaks": [2, 2, 2, 2],
+            "mapping_ok": [1, 1, 1, 1],
+        }
+        mappings_df = pd.DataFrame(data)
         pipeline = mock_proper_mapping_pipeline
-        params, outliers = pipeline._tune_regress(real_pos, ref_pos)
-        print(params, outliers)
-        assert len(outliers) == 1
-        assert pytest.approx(params["const"],abs=5) == 10
-        assert pytest.approx(params["real_pos"],abs=1) == 1
-    
-    def test_tune_regress_small_outlier(self, mock_proper_mapping_pipeline):
-        ref_pos = pd.Series(
-            [pos for pos in range(110,141)]
-        )
-        ref_pos.name = "ref_pos"
-        real_pos = pd.Series(
-            [100,100,103,103,104,105,105,108,108,109,110,111,112,112,115,115,116,117,118,119,120,121,50,123,124,125,126,127,128,129,130]
-        )
-        real_pos.name = "real_pos"
+
+        # Execute
+        bad_mappings = pipeline._resolve_multiple_mappings(mappings_df)
+
+        # Verify
+        assert bad_mappings.empty
+
+
+class TestMappingPipeline_filterMappings:
+
+    @patch("portek.portek_map.MappingPipeline._resolve_multiple_mappings")
+    def test_filter_mappings_bad_mappings(
+        self, mock_resolve_multiple_mappings, mock_proper_mapping_pipeline
+    ):
+        # Setup
         pipeline = mock_proper_mapping_pipeline
-        params, outliers = pipeline._tune_regress(real_pos, ref_pos)
+        mock_resolve_multiple_mappings.return_value = pd.Index([1, 3])
+        data = {
+            "kmer": ["AAAAA", "AAAAA", "CCCCC", "CCCCC"],
+            "flag": [0, 256, 0, 256],
+            "ref_pos": [10, 20, 30, 40],
+            "CIGAR": ["10M", "10M", "10M", "10M"],
+            "n_mismatch": [0, 1, 0, 1],
+            "score": [0, -6, 0, -6],
+            "group": ["group1", "group2", "group1", "group2"],
+            "mutations": ["WT", "WT", "WT", "WT"],
+            "mapping_ok": [1, 1, 1, 1],
+            "real_pos": [10, 10, 30, 30],
+            "n_peaks": [1, 1, 1, 1],
+        }
+        mappings_df = pd.DataFrame(data)
 
-        assert len(outliers) == 1
-        assert pytest.approx(params["const"],abs=5) == 10
-        assert pytest.approx(params["real_pos"],abs=1) == 1
+        # Execute
+        filtered_df = pipeline._filter_mappings(mappings_df)
+
+        # Verify
+        assert len(filtered_df) == 2
+        assert filtered_df["kmer"].tolist() == ["AAAAA", "CCCCC"]
+
+    @patch("portek.portek_map.MappingPipeline._resolve_multiple_mappings")
+    def test_filter_mappings_no_bad_mappings(
+        self, mock_resolve_multiple_mappings, mock_proper_mapping_pipeline
+    ):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        mock_resolve_multiple_mappings.return_value = pd.Index([])
+        data = {
+            "kmer": ["AAAAA", "AAAAA", "CCCCC", "CCCCC"],
+            "flag": [0, 256, 0, 256],
+            "ref_pos": [10, 20, 30, 40],
+            "CIGAR": ["10M", "10M", "10M", "10M"],
+            "n_mismatch": [0, 0, 0, 0],
+            "score": [0, 0, 0, 0],
+            "group": ["group1", "group2", "group1", "group2"],
+            "mutations": ["WT", "WT", "WT", "WT"],
+            "mapping_ok": [1, 1, 1, 1],
+            "real_pos": [10, 20, 30, 40],
+            "n_peaks": [2, 2, 2, 2],
+        }
+        mappings_df = pd.DataFrame(data)
+
+        # Execute
+        filtered_df = pipeline._filter_mappings(mappings_df)
+
+        # Verify
+        assert len(filtered_df) == 4
+        assert filtered_df["kmer"].tolist() == ["AAAAA", "AAAAA", "CCCCC", "CCCCC"]
 
 
+class TestMappingPipeline_formatMappingsDf:
+
+    def test_format_mappings_df(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+
+        # Create a sample DataFrame to test
+        data = {
+            "kmer": ["AAAAA", "TTTTT", "CCCCC"],
+            "flag": [0, 4, 0],
+            "ref_pos": [10, 0, 30],
+            "CIGAR": [["M"] * 5, [], ["M"] * 5],
+            "n_mismatch": [0, 0, 1],
+            "score": [0, -30, -6],
+            "group": ["group1", "group2", "group1"],
+            "mutations": ["WT", "WT", "31G>C"],
+            "mapping_ok": [1, 1, 1],
+            "real_pos": [10, 20, 30],
+            "n_peaks": [1, 1, 1],
+        }
+        mappings_df = pd.DataFrame(data)
+
+        # Expected DataFrame after formatting
+        expected_data = {
+            "kmer": ["AAAAA", "TTTTT", "CCCCC"],
+            "ref_pos": [10, 0, 30],
+            "n_mismatch": [0, 5, 1],
+            "group": ["group1", "group2", "group1"],
+            "mutations": ["WT", "-", "31G>C"],
+        }
+        expected_df = pd.DataFrame(expected_data).sort_values("ref_pos")
+
+        # Execute the method
+        formatted_df = pipeline._format_mappings_df(mappings_df)
+
+        # Verify
+        pd.testing.assert_frame_equal(formatted_df, expected_df)
 
 
+class TestMappingPipeline_countMappings:
+    def test_count_mappings_all_aligned(self, mock_proper_mapping_pipeline, capsys):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        mappings_df = pd.DataFrame(
+            {"kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"], "flag": [0, 0, 0, 0]}
+        )
+        # Exectue
+        pipeline._count_mappings(mappings_df)
+
+        # Verify
+        captured_output = capsys.readouterr()
+        assert captured_output.out == (
+            "\n4 out of 4 5-mers were aligned to the reference.\n"
+            "Of those, 0 were aligned to more than one position.\n"
+            "0 5-mers couldn't be aligned.\n"
+        )
+
+    def test_count_mappings_some_unaligned(self, mock_proper_mapping_pipeline, capsys):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        mappings_df = pd.DataFrame(
+            {"kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"], "flag": [0, 4, 0, 4]}
+        )
+
+        # Execute
+        pipeline._count_mappings(mappings_df)
+
+        # Verify
+        captured_output = capsys.readouterr()
+        assert captured_output.out == (
+            "\n2 out of 4 5-mers were aligned to the reference.\n"
+            "Of those, 0 were aligned to more than one position.\n"
+            "2 5-mers couldn't be aligned.\n"
+        )
+
+    def test_count_mappings_multiple_mappings(
+        self, mock_proper_mapping_pipeline, capsys
+    ):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        mappings_df = pd.DataFrame(
+            {"kmer": ["AAAAA", "AAAAA", "AAAAG", "AAAAT"], "flag": [0, 256, 0, 0]}
+        )
+
+        # Execute
+        pipeline._count_mappings(mappings_df)
+
+        # Verify
+        captured_output = capsys.readouterr()
+        assert captured_output.out == (
+            "\n3 out of 4 5-mers were aligned to the reference.\n"
+            "Of those, 1 were aligned to more than one position.\n"
+            "1 5-mers couldn't be aligned.\n"
+        )
+
+    def test_count_mappings_no_aligned(self, mock_proper_mapping_pipeline, capsys):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        mappings_df = pd.DataFrame(
+            {"kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"], "flag": [4, 4, 4, 4]}
+        )
+
+        # Execute
+        pipeline._count_mappings(mappings_df)
+
+        # Verify
+        captured_output = capsys.readouterr()
+        assert captured_output.out == (
+            "\n0 out of 4 5-mers were aligned to the reference.\n"
+            "Of those, 0 were aligned to more than one position.\n"
+            "4 5-mers couldn't be aligned.\n"
+        )
+
+
+class TestMappingPipelineAnalyzeMapping:
+
+    @patch("portek.portek_map.MappingPipeline._read_sam_to_df")
+    @patch("portek.portek_map.MappingPipeline._get_kmer_peaks")
+    @patch("portek.portek_map.MappingPipeline._filter_mappings")
+    @patch("portek.portek_map.MappingPipeline._find_variants")
+    @patch("portek.portek_map.MappingPipeline._mutation_tuple_to_text")
+    @patch("portek.portek_map.MappingPipeline._format_mappings_df")
+    @patch("portek.portek_map.MappingPipeline._count_mappings")
+    def test_analyze_mapping_success(
+        self,
+        mock_count_mappings,
+        mock_format_mappings_df,
+        mock_mutation_tuple_to_text,
+        mock_find_variants,
+        mock_filter_mappings,
+        mock_get_kmer_peaks,
+        mock_read_sam_to_df,
+        mock_proper_mapping_pipeline,
+    ):
+        # Setup
+        mock_read_sam_to_df.return_value = pd.DataFrame(
+            {
+                "kmer": ["AAAAA", "TTTTT"],
+                "flag": [0, 0],
+                "ref_pos": [10, 20],
+                "CIGAR": [["M"] * 5, ["M"] * 5],
+                "n_mismatch": [0, 1],
+                "score": [0, -6],
+                "group": ["group1", "group2"],
+                "mutations": ["WT", "WT"],
+                "mapping_ok": [1, 1],
+            }
+        )
+        mock_get_kmer_peaks.return_value = {
+            "group1": {"AAAAA": np.array([10])},
+            "group2": {"TTTTT": np.array([20])},
+        }
+        mock_filter_mappings.return_value = mock_read_sam_to_df.return_value
+        mock_find_variants.return_value = [(21, "A", "T")]
+        mock_mutation_tuple_to_text.return_value = "21A>T"
+        mock_format_mappings_df.return_value = pd.DataFrame(
+            {
+                "kmer": ["AAAAA", "TTTTT"],
+                "ref_pos": [10, 20],
+                "n_mismatch": [0, 1],
+                "group": ["group1", "group2"],
+                "mutations": ["WT", "21A>T"],
+            }
+        )
+        pipeline = mock_proper_mapping_pipeline
+
+        # Execute
+        pipeline.analyze_mapping(verbose=True)
+
+        # Verify
+        mock_read_sam_to_df.assert_called_once()
+        mock_get_kmer_peaks.assert_called_once()
+        mock_filter_mappings.assert_called_once()
+        mock_find_variants.assert_called_once()
+        mock_mutation_tuple_to_text.assert_called_once()
+        mock_format_mappings_df.assert_called_once()
+        mock_count_mappings.assert_called_once()
+
+        assert "mappings" in pipeline.matrices
+        assert pipeline.matrices["mappings"].loc[1, "mutations"] == "21A>T"
+
+    @patch("portek.portek_map.MappingPipeline._read_sam_to_df")
+    @patch("portek.portek_map.MappingPipeline._get_kmer_peaks")
+    @patch("portek.portek_map.MappingPipeline._filter_mappings")
+    @patch("portek.portek_map.MappingPipeline._find_variants")
+    @patch("portek.portek_map.MappingPipeline._mutation_tuple_to_text")
+    @patch("portek.portek_map.MappingPipeline._format_mappings_df")
+    def test_analyze_mapping_no_mismatches(
+        self,
+        mock_format_mappings_df,
+        mock_mutation_tuple_to_text,
+        mock_find_variants,
+        mock_filter_mappings,
+        mock_get_kmer_peaks,
+        mock_read_sam_to_df,
+        mock_proper_mapping_pipeline,
+    ):
+        # Setup
+        mock_read_sam_to_df.return_value = pd.DataFrame(
+            {
+                "kmer": ["AAAAA"],
+                "flag": [0],
+                "ref_pos": [10],
+                "CIGAR": [["M"] * 5],
+                "n_mismatch": [0],
+                "score": [0],
+                "group": ["group1"],
+                "mutations": ["WT"],
+                "mapping_ok": [1],
+            }
+        )
+        mock_get_kmer_peaks.return_value = {"group1": {"AAAAA": np.array([10])}}
+        mock_filter_mappings.return_value = mock_read_sam_to_df.return_value
+        mock_format_mappings_df.return_value = pd.DataFrame(
+            {
+                "kmer": ["AAAAA"],
+                "ref_pos": [10],
+                "n_mismatch": [0],
+                "group": ["group1"],
+                "mutations": ["WT"],
+            }
+        )
+        pipeline = mock_proper_mapping_pipeline
+
+        # Execute
+        pipeline.analyze_mapping(verbose=True)
+
+        # Verify
+        mock_read_sam_to_df.assert_called_once()
+        mock_get_kmer_peaks.assert_called_once()
+        mock_filter_mappings.assert_called_once()
+        mock_find_variants.assert_not_called()
+        mock_mutation_tuple_to_text.assert_not_called()
+        mock_format_mappings_df.assert_called_once()
+
+        assert "mappings" in pipeline.matrices
+        assert pipeline.matrices["mappings"].loc[0, "mutations"] == "WT"
+
+    @patch("portek.portek_map.MappingPipeline._read_sam_to_df")
+    @patch("portek.portek_map.MappingPipeline._get_kmer_peaks")
+    @patch("portek.portek_map.MappingPipeline._filter_mappings")
+    @patch("portek.portek_map.MappingPipeline._find_variants")
+    @patch("portek.portek_map.MappingPipeline._mutation_tuple_to_text")
+    @patch("portek.portek_map.MappingPipeline._format_mappings_df")
+    def test_analyze_mapping_with_multiple_mismatches(
+        self,
+        mock_format_mappings_df,
+        mock_mutation_tuple_to_text,
+        mock_find_variants,
+        mock_filter_mappings,
+        mock_get_kmer_peaks,
+        mock_read_sam_to_df,
+        mock_proper_mapping_pipeline,
+    ):
+        # Setup
+        mock_read_sam_to_df.return_value = pd.DataFrame(
+            {
+                "kmer": ["AAAAA"],
+                "flag": [0],
+                "ref_pos": [10],
+                "CIGAR": [["M", "M", "I", "M", "M"]],
+                "n_mismatch": [2],
+                "score": [-12],
+                "group": ["group1"],
+                "mutations": ["WT"],
+                "mapping_ok": [1],
+            }
+        )
+        mock_get_kmer_peaks.return_value = {"group1": {"AAAAA": np.array([10])}}
+        mock_filter_mappings.return_value = mock_read_sam_to_df.return_value
+        mock_find_variants.return_value = [(10, "T", "A"), (11, "ins", "A")]
+        mock_mutation_tuple_to_text.side_effect = ["10T>A", "11_12insA"]
+        mock_format_mappings_df.return_value = pd.DataFrame(
+            {
+                "kmer": ["AAAAA"],
+                "ref_pos": [10],
+                "n_mismatch": [2],
+                "group": ["group1"],
+                "mutations": ["10T>A; 11_12insA"],
+            }
+        )
+        pipeline = mock_proper_mapping_pipeline
+
+        # Execute
+        pipeline.analyze_mapping(verbose=True)
+
+        # Verify
+        mock_read_sam_to_df.assert_called_once()
+        mock_get_kmer_peaks.assert_called_once()
+        mock_filter_mappings.assert_called_once()
+        mock_find_variants.assert_called_once()
+        mock_mutation_tuple_to_text.assert_called()
+        mock_format_mappings_df.assert_called_once()
+
+        assert "mappings" in pipeline.matrices
+        assert pipeline.matrices["mappings"].loc[0, "mutations"] == "10T>A; 11_12insA"
+
+
+class TestMappingPipelineSaveMappingsDf:
+
+    @patch("pandas.DataFrame.to_csv")
+    def test_save_mappings_df_success(self, mock_to_csv, mock_proper_mapping_pipeline):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.matrices["mappings"] = pd.DataFrame(
+            {"kmer": ["AAAAA", "TTTTT"], "ref_pos": [1, 2], "mutations": ["WT", "WT"]}
+        )
+
+        # Execute
+        pipeline.save_mappings_df()
+
+        # Verify
+        mock_to_csv.assert_called_once_with(
+            f"{pipeline.project_dir}/output/enriched_{pipeline.k}mers_mappings.csv"
+        )
+
+    @patch("pandas.DataFrame.to_csv")
+    def test_save_mappings_df_no_mappings(
+        self, mock_to_csv, mock_proper_mapping_pipeline
+    ):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.matrices["mappings"] = pd.DataFrame()
+
+        # Execute
+        pipeline.save_mappings_df()
+
+        # Verify
+        mock_to_csv.assert_called_once_with(
+            f"{pipeline.project_dir}/output/enriched_{pipeline.k}mers_mappings.csv"
+        )
+
+    @patch("pandas.DataFrame.to_csv")
+    def test_save_mappings_df_with_index(
+        self, mock_to_csv, mock_proper_mapping_pipeline
+    ):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.matrices["mappings"] = pd.DataFrame(
+            {"kmer": ["AAAAA", "TTTTT"], "ref_pos": [1, 2], "mutations": ["-", "-"]}
+        )
+        pipeline.matrices["mappings"].index.name = "id"
+
+        # Execute
+        pipeline.save_mappings_df()
+
+        # Verify
+        mock_to_csv.assert_called_once_with(
+            f"{pipeline.project_dir}/output/enriched_{pipeline.k}mers_mappings.csv"
+        )

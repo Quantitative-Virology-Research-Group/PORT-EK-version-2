@@ -17,9 +17,9 @@ def mock_config():
 @pytest.fixture
 def mock_enriched_csv():
     return pd.DataFrame({
-        "group": ["group1", "group2"],
-        "value": [1, 2]
-    })
+            "group": ["group1", "group2", "group1", "group2"],
+            "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"]
+        }, index=["AAAAA", "AAAAC", "AAAAG", "AAAAT"])
 
 @pytest.fixture
 @patch("os.path.isdir")
