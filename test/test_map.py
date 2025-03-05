@@ -586,6 +586,18 @@ class TestMappingPipeline_alingSeqs:
         assert t_seq == list("CGTAC")
         assert ref_pos == [3, 4, 5, 6, 7]
 
+    def test_align_seqs_pos1(self, mock_proper_mapping_pipeline):
+        pipeline = mock_proper_mapping_pipeline
+        ref_seq = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAG"
+        kmer = "ATGCG"
+        map_pos = 0
+        cigar = ["M", "M", "M", "M", "M"]
+
+        q_seq, t_seq, ref_pos = pipeline._align_seqs(ref_seq, kmer, map_pos, cigar)
+
+        assert q_seq == list("ATGCG")
+        assert t_seq == list("ATGCG")
+        assert ref_pos == [0,1,2,3,4]
     def test_align_seqs_with_deletion(self, mock_proper_mapping_pipeline):
         pipeline = mock_proper_mapping_pipeline
         ref_seq = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAG"
