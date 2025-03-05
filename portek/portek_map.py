@@ -151,6 +151,8 @@ class MappingPipeline:
             "-a",
             "-L",
             f"{seed_length}",
+            "--score-min",
+            "L,-0.6,-1",
             "-x",
             f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}",
             "-f",
@@ -412,35 +414,43 @@ class MappingPipeline:
             bad_mappings = bad_mappings.union(kmer_sub_df.iloc[n_peaks:].index)
         return bad_mappings
 
-    def _filter_mappings(self, mappings_df: pd.DataFrame)-> pd.DataFrame:
+    def _filter_mappings(self, mappings_df: pd.DataFrame, verbose: bool=False)-> pd.DataFrame:
         bad_mappings = self._resolve_multiple_mappings(mappings_df)
         mappings_df.loc[bad_mappings, "mapping_ok"] = 0
         mappings_df = mappings_df[mappings_df["mapping_ok"] == 1]
+        if verbose == True:
+            print(f"Rejected {len(bad_mappings)} dubious alignments.")
         return mappings_df
 
-    def _predict_unmapped(self, mappings_df: pd.DataFrame, window:int = 1000) -> pd.DataFrame:
-        mapped = mappings_df[mappings_df["ref_pos"] != 0].index
-        if len(mapped) < 30:
-            print("Not enough mapped k-mers for position prediction, skipping.")
-            mappings_df["pred_pos"] = 0
-            mappings_df["pred_err"] = 0.0
-            return mappings_df
-        
-        real_mapped_pos = mappings_df.loc[mapped, "real_pos"]
-        ref_mapped_pos = mappings_df.loc[mapped, "ref_pos"]
-        regress = linregress(real_mapped_pos, ref_mapped_pos)
-        mappings_df["pred_pos"] = round(regress.slope*mappings_df["real_pos"]+regress.intercept).astype(int)
-        pred_mapped_err = mappings_df.loc[mapped, "pred_pos"]-ref_mapped_pos
-        perpos_err =[]
-        for pos in range(1, mappings_df["pred_pos"].max()+1):
-            errs = pred_mapped_err[(mappings_df["pred_pos"] > pos-window//2) & (mappings_df["pred_pos"] < pos+window//2)]
-            if len(errs) == 0:
-                perpos_err.append(-1)
-            else:
-                perpos_err.append(np.sqrt(sum(errs**2)/len(errs)))
-        perpos_err = np.array(perpos_err)
-        mappings_df[f"pred_err"] = perpos_err[mappings_df["pred_pos"]-1]
-        return mappings_df
+    def _predict_unmapped(self, mappings_df: pd.DataFrame) -> pd.DataFrame:
+        mappings_with_pred_df = mappings_df.copy()
+        mappings_with_pred_df["pred_pos"] = 0
+        mappings_with_pred_df["pred_err"] = 0.0
+        mappings_with_pred_df["pred_r2"] = 0.0
+        for group in mappings_with_pred_df["group"].unique():
+            group_mappings = mappings_with_pred_df.loc[mappings_with_pred_df["group"] == group].index
+            mapped = mappings_with_pred_df.loc[(mappings_with_pred_df["ref_pos"] != 0) & (mappings_with_pred_df["group"] == group)].index
+            if len(mapped) < 30:
+                print(f"Not enough mapped k-mers for position prediction in group {group}, skipping.")
+                continue
+            real_mapped_pos = mappings_with_pred_df.loc[mapped, "real_pos"]
+            ref_mapped_pos = mappings_with_pred_df.loc[mapped, "ref_pos"]
+            regress = linregress(real_mapped_pos, ref_mapped_pos)
+            mappings_with_pred_df.loc[group_mappings, "pred_pos"] = round(regress.slope*mappings_with_pred_df.loc[group_mappings,"real_pos"]+regress.intercept).astype(int)
+            pred_mapped_err = mappings_with_pred_df.loc[mapped, "pred_pos"]-ref_mapped_pos
+            rmse = np.sqrt(sum(pred_mapped_err**2)/len(pred_mapped_err))
+            mappings_with_pred_df.loc[group_mappings, "pred_err"] = round(rmse, 2)
+            mappings_with_pred_df.loc[group_mappings, "pred_r2"] = round(regress.rvalue, 2)
+            # perpos_err =[]
+            # for pos in range(1, mappings_df["pred_pos"].max()+1):
+            #     errs = pred_mapped_err[(mappings_df["pred_pos"] > pos-window//2) & (mappings_df["pred_pos"] < pos+window//2)]
+            #     if len(errs) == 0:
+            #         perpos_err.append(-1)
+            #     else:
+            #         perpos_err.append(np.sqrt(sum(errs**2)/len(errs)))
+            # perpos_err = np.array(perpos_err)
+            # mappings_df[f"pred_err"] = perpos_err[mappings_df["pred_pos"]-1]
+        return mappings_with_pred_df
     
     def _format_mappings_df(self, mappings_df: pd.DataFrame) -> pd.DataFrame:
         mappings_df.loc[mappings_df["flag"] == 4, "mutations"] = "-"
@@ -478,7 +488,7 @@ class MappingPipeline:
             ),
             axis=1,
         )
-        filtered_df = self._filter_mappings(mappings_df)
+        filtered_df = self._filter_mappings(mappings_df, verbose)
         for row in filtered_df.itertuples():
             if row.n_mismatch > 0:
                 mutations_as_tuples = self._find_variants(
@@ -491,7 +501,7 @@ class MappingPipeline:
         if verbose == True:
             self._count_mappings(filtered_df)
         mappings_with_pred_df = self._predict_unmapped(filtered_df)
-        formatted_df = self._format_mappings_df(filtered_df)
+        formatted_df = self._format_mappings_df(mappings_with_pred_df)
         self.matrices["mappings"] = formatted_df
 
 

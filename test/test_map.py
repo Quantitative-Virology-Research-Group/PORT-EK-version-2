@@ -1389,7 +1389,7 @@ class TestMappingPipelinePredictUnmapped:
             "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"]*10,
             "flag": [0, 0, 0, 4]*10,
             "ref_pos": [10, 20, 30, 0]*10,
-            "real_pos": [11, 21, 31, 0]*10,
+            "real_pos": [11, 21, 31, 40]*10,
             "n_mismatch": [0, 0, 0, 0]*10,
             "score": [0, 0, 0, -30]*10,
             "group": ["group1", "group1", "group1", "group1"]*10,
@@ -1399,11 +1399,43 @@ class TestMappingPipelinePredictUnmapped:
         pipeline = mock_proper_mapping_pipeline
 
         # Execute
-        result_df = pipeline._predict_unmapped(mock_read_sam_to_df.return_value, window=2)
+        result_df = pipeline._predict_unmapped(mock_read_sam_to_df.return_value)
 
         # Verify
         assert "pred_pos" in result_df.columns
+        assert 0.0 not in result_df["pred_pos"].values
         assert "pred_err" in result_df.columns
+        assert "pred_r2" in result_df.columns
+
+    @patch("portek.portek_map.MappingPipeline._read_sam_to_df")
+    def test_predict_unmapped_one_group_unmapped(self, mock_read_sam_to_df, mock_proper_mapping_pipeline, capsys):
+        # Setup
+        mock_read_sam_to_df.return_value = pd.DataFrame({
+            "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"]*10,
+            "flag": [0, 0, 0, 4]*10,
+            "ref_pos": [10, 20, 30, 0]*10,
+            "real_pos": [11, 21, 31, 40]*10,
+            "n_mismatch": [0, 0, 0, 0]*10,
+            "score": [0, 0, 0, -30]*10,
+            "group": ["group1", "group1", "group1", "group2"]*10,
+            "mutations": ["WT", "WT", "WT", "WT"]*10,
+            "mapping_ok": [1, 1, 1, 1]*10
+        })
+        pipeline = mock_proper_mapping_pipeline
+
+        # Execute
+        result_df = pipeline._predict_unmapped(mock_read_sam_to_df.return_value)
+        captured_output = capsys.readouterr()
+
+        # Verify
+        assert "pred_pos" in result_df.columns
+        assert result_df.loc[result_df["group"] == "group2", "pred_pos"].sum() == 0
+        assert "pred_err" in result_df.columns
+        assert result_df.loc[result_df["group"] == "group2", "pred_err"].sum() == 0.0
+        assert "pred_r2" in result_df.columns
+        assert result_df.loc[result_df["group"] == "group2", "pred_r2"].sum() == 0.0
+        assert captured_output.out == "Not enough mapped k-mers for position prediction in group group2, skipping.\n"
+
 
     @patch("portek.portek_map.MappingPipeline._read_sam_to_df")
     def test_predict_unmapped_no_mapped(self, mock_read_sam_to_df, mock_proper_mapping_pipeline):
@@ -1422,13 +1454,15 @@ class TestMappingPipelinePredictUnmapped:
         pipeline = mock_proper_mapping_pipeline
 
         # Execute
-        result_df = pipeline._predict_unmapped(mock_read_sam_to_df.return_value, window=2)
+        result_df = pipeline._predict_unmapped(mock_read_sam_to_df.return_value)
 
         # Verify
         assert "pred_pos" in result_df.columns
         assert result_df["pred_pos"].sum() == 0
         assert "pred_err" in result_df.columns
         assert result_df["pred_pos"].sum() == 0.0
+        assert "pred_r2" in result_df.columns
+        assert result_df["pred_r2"].sum() == 0.0
 
 class TestMappingPipeline_countMappings:
     def test_count_mappings_all_aligned(self, mock_proper_mapping_pipeline, capsys):
