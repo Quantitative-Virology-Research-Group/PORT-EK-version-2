@@ -45,13 +45,6 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "-rf",
-    help="Perform refernce free alignment",
-    default=False,
-    action="store_true",
-)
-
-parser.add_argument(
     "-n_jobs",
     help="Number of processes used in PORT-EK find and PORT-EK enriched (default 4)",
     default=4,
@@ -119,15 +112,14 @@ def main():
 
     elif args.tool == "map":
         start_time = datetime.now()
-        if args.rf == False:
-            mapping_pipeline = portek.MappingPipeline(args.project_dir, args.k)
-            mapping_pipeline.run_mapping(verbose=args.verbose)
-            mapping_pipeline.analyze_mapping(verbose=args.verbose)
-            mapping_pipeline.save_mappings_df()
-        else:
-            mapping_pipeline = portek.RefFreePipeline(args.project_dir, args.k)
-            mapping_pipeline.get_kmer_pos("enriched", verbose=args.verbose)
-            mapping_pipeline.save_group_distros(verbose=args.verbose)
+        mapping_pipeline = portek.MappingPipeline(args.project_dir, args.k)
+        mapping_pipeline.get_samples(verbose=args.verbose)
+        mapping_pipeline.run_mapping(verbose=args.verbose)
+        mapping_pipeline.analyze_mapping(verbose=args.verbose)
+        mapping_pipeline.save_mappings_df()
+        end_timeS_ARE_NOT_CANON = datetime.now()
+        running_time = end_timeS_ARE_NOT_CANON - start_time
+        print(f"\nTotal running time: {running_time}")
     elif args.tool == "classify":
         pass
 

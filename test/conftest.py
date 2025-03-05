@@ -1,224 +1,57 @@
 import pytest
-import os
-import shutil
-from unittest import mock
-
-import pysam
-import pandas as pd
 import numpy as np
-
-
-@pytest.fixture
-def correct_project_dir():
-    cor_dir = "test/testproject/"
-    return cor_dir
-
+import pandas as pd
+from unittest.mock import patch, mock_open, MagicMock
+from portek.portek_map import MappingPipeline
 
 @pytest.fixture
-def no_project_dir():
-    fake_dir = "test/faketestproject/"
-    return fake_dir
-
-
-@pytest.fixture
-def empty_project_dir():
-    empt_dir = "test/emptytestproject/"
-    os.makedirs(empt_dir)
-    yield empt_dir
-    os.removedirs(empt_dir)
-
-
-@pytest.fixture
-def default_max_k():
-    return 31
-
-@pytest.fixture
-def default_min_k():
-    return 5
-
-
-@pytest.fixture
-def correct_k():
-    return 15
-
-
-@pytest.fixture
-def correct_min_k():
-    return 11
-
-@pytest.fixture
-def float_k():
-    return 31.0
-
-
-@pytest.fixture
-def small_k():
-    return 3
-
-
-@pytest.fixture
-def even_k():
-    return 30
-
-
-@pytest.fixture
-def correct_bowtie_build_cmd():
-    return "bowtie2-build -f test/testproject//input/ref_seq.fasta test/testproject//temp/ref_index/ref_seq"
-
-
-@pytest.fixture
-def correct_bowtie_map_cmd():
-    return "bowtie2 -a --norc -L 8 -x test/testproject//temp/ref_index/ref_seq -f test/testproject//temp/enriched_15mers.fasta -S test/testproject//temp/enriched_15mers.sam"
-
-
-@pytest.fixture
-def test_mapping_groups():
-    mapping_path = f"test/testproject/output/enriched_15mers_stats.csv"
-    with open(mapping_path, mode="r") as in_file:
-        test_mappings_df = pd.read_csv(in_file, index_col=0)
-    test_mapping_group_list = test_mappings_df["group"].to_list()
-    return test_mapping_group_list
-
-
-@pytest.fixture
-def CIGARS_to_parse():
-    cigars = ["15M", "8M3I4M", "8M1D1M2I4M", "10M5H", "2S10M3S", "*"]
-    return cigars
-
-
-@pytest.fixture
-def expected_CIGARS():
-    cigars = [
-        ["M", "M", "M", "M", "M", "M", "M", "M", "M", "M", "M", "M", "M", "M", "M"],
-        ["M", "M", "M", "M", "M", "M", "M", "M", "I", "I", "I", "M", "M", "M", "M"],
-        [
-            "M",
-            "M",
-            "M",
-            "M",
-            "M",
-            "M",
-            "M",
-            "M",
-            "D",
-            "M",
-            "I",
-            "I",
-            "M",
-            "M",
-            "M",
-            "M",
-        ],
-        ["M", "M", "M", "M", "M", "M", "M", "M", "M", "M", "H", "H", "H", "H", "H"],
-        ["S", "S", "M", "M", "M", "M", "M", "M", "M", "M", "M", "M", "S", "S", "S"],
-        [],
-    ]
-    return cigars
-
-
-@pytest.fixture
-def test_ref_seq():
-    return "GCCCGCTGTCGCA"
-
-
-@pytest.fixture
-def test_mappings():
-    mappings = {
-        "kmer": ["CTGTCGC", "CTCTCGC", "CCCAAGC", "CCCGTCG", "CCCAAGCCCC"],
-        "pos": [5, 5, 1, 1, 1],
-        "CIGAR": [
-            ["M", "M", "M", "M", "M", "M", "M"],
-            ["M", "M", "M", "M", "M", "M", "M"],
-            ["M", "M", "M", "I", "I", "M", "M"],
-            ["M", "M", "M", "D", "D", "D", "M", "M", "M", "M"],
-            ["M", "M", "M", "I", "I", "M", "M", "D", "D", "D", "M", "M", "M"],
-        ],
-        "n_mismatch": [0, 1, 2, 3, 6],
+def mock_config():
+    return {
+        "sample_groups": ["group1", "group2"],
+        "mode": "ovr",
+        "goi": "group1",
+        "ref_seq": "reference.fasta",
+        "ref_genes": ["gene1", "gene2"]
     }
-    return mappings
-
 
 @pytest.fixture
-def expected_mutations():
-    expected_mutations_list = [
-        [],
-        [(8, "G", "C")],
-        [(4, "ins", "A"), (4, "ins", "A")],
-        [
-            (5, "del", 5),
-            (6, "del", 6),
-            (7, "del", 7),
-        ],
-        [
-            (4, "ins", "A"),
-            (4, "ins", "A"),
-            (7, "del", 7),
-            (8, "del", 8),
-            (9, "del", 9),
-            (11, "G", "C"),
-        ],
-    ]
-    return expected_mutations_list
-
+def mock_enriched_csv():
+    return pd.DataFrame({
+            "group": ["group1", "group2", "group1", "group2"],
+            "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"]
+        }, index=["AAAAA", "AAAAC", "AAAAG", "AAAAT"])
 
 @pytest.fixture
-def expected_mutations_joined():
-    expected_mutations_list = [
-        [],
-        [(8, "G", "C")],
-        [(4, "ins", "AA")],
-        [
-            (5, "del", 7),
-        ],
-        [
-            (11, "G", "C"),
-            (4, "ins", "AA"),
-            (7, "del", 9),
-        ],
-    ]
-    return expected_mutations_list
+@patch("os.path.isdir")
+@patch("builtins.open", new_callable=mock_open)
+@patch("yaml.safe_load")
+@patch("pandas.read_csv")
+@patch("Bio.SeqIO.read")
+def mock_proper_mapping_pipeline(
+        mock_seqio_read,
+        mock_read_csv,
+        mock_yaml_load,
+        mock_open,
+        mock_isdir,
+        mock_config,
+        mock_enriched_csv,
+    ):
+        mock_isdir.return_value = True
+        mock_yaml_load.return_value = mock_config
+        mock_read_csv.return_value = mock_enriched_csv
+        mock_seqio_read.return_value.seq = "ATGC"
 
-
-@pytest.fixture
-def expected_mutations_text():
-    expected_mutations_list = [
-        "",
-        "8G>C",
-        "4_5insAA",
-        "5_7del",
-        "11G>C; 4_5insAA; 7_9del",
-    ]
-    return expected_mutations_list
-
+        return MappingPipeline("/fake/dir", 5)
 
 @pytest.fixture
-def test_project_mutation_dict():
-    expected_dict = {
-        "7T>G": [
-            "GGTCGCACCTAGAGT",
-            "GCCCGCGGTCGCACC",
-            "CGCGGTCGCACCTAG",
-            "GCGGTCGCACCTAGA",
-            "CGGTCGCACCTAGAG",
-            "CCGCGGTCGCACCTA",
-            "CCCGCGGTCGCACCT",
-        ],
-        "45T>A": [
-            "CTCAGAAATTCTGTT",
-            "TGCTCAGAAATTCTG",
-            "GAAATTCTGTTGGCG",
-            "CATTGCTCAGAAATT",
-            "GCTCAGAAATTCTGT",
-            "GGTCATTGCTCAGAA",
-            "GTCATTGCTCAGAAA",
-            "TCATTGCTCAGAAAT",
-            "AAATTCTGTTGGCGT",
-            "TCAGAAATTCTGTTG",
-            "TTGCTCAGAAATTCT",
-            "CAGAAATTCTGTTGG",
-            "AATTCTGTTGGCGTG",
-            "AGAAATTCTGTTGGC",
-            "ATTGCTCAGAAATTC"
-        ]
+def actual_positions():
+    return {
+        "group1": {
+            "AAAAA": np.array([10, 20, 30]),
+            "CCCCC": np.array([15, 25, 35])
+        },
+        "group2": {
+            "GGGGG": np.array([5, 15, 25]),
+            "TTTTT": np.array([10, 20, 30])
+        }
     }
-    return expected_dict

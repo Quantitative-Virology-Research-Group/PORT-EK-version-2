@@ -167,6 +167,7 @@ class EnrichedKmersPipeline:
         print(
             f"{non_singles} {self.k}-mers passed the entropy filter."
         )
+
         if non_singles * len(sample_list) > 2*(2**30):
             common_kmer_matrix = common_kmer_matrix[
                 (common_kmer_matrix[self.freq_cols] > 0.1).product(axis=1).astype(bool)
@@ -471,6 +472,9 @@ class EnrichedKmersPipeline:
                         self.matrices[matrix_type][f"-log10_{p_name}"] = -np.log10(
                             self.matrices[matrix_type][p_name]
                         )
+                    if verbose == True:
+                        print(f"Done calculating differences for groups {self.sample_groups[i]} and {self.sample_groups[j]}.")
+
             self.matrices[matrix_type]["RMSE"] = np.sqrt(
                 ((self.matrices[matrix_type][err_cols]) ** 2).mean(axis=1)
             )
@@ -515,6 +519,9 @@ class EnrichedKmersPipeline:
                 self.matrices[matrix_type][f"-log10_{p_name}"] = -np.log10(
                     self.matrices[matrix_type][p_name]
                 )
+                if verbose == True:
+                    print(f"Done calculating differences for group of interest {self.goi} and control group {group}.")
+                                        
             self.matrices[matrix_type]["RMSE"] = np.sqrt(
                 ((self.matrices[matrix_type][err_cols]) ** 2).mean(axis=1)
             )

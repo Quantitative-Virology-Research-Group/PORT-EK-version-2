@@ -1,20 +1,20 @@
-import pathlib
-import os
-import shutil
-import yaml
-import pickle
-import subprocess
-import math
-import regex
 import itertools
+import math
 import operator
-from collections import Counter
+import os
+import pathlib
+import pickle
+import shutil
+import subprocess
+
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import pysam
+import regex
+import yaml
 from Bio import SeqIO
+from scipy.ndimage import histogram
+from scipy.signal import find_peaks
 
 import portek
 
@@ -45,16 +45,19 @@ class MappingPipeline:
                 self.goi = None
                 self.control_groups = None
             else:
-                raise ValueError(
-                    "Unrecognized analysis mode, should by ava or ovr. Check your config file!"
-                )
+                err_msg = "Unrecognized analysis mode, should by ava or ovr. Check your config file!"
+                raise ValueError()
 
             self.ref_seq_name = ".".join(config["ref_seq"].split(".")[:-1])
-            self.ref_seq = str(
-                SeqIO.read(
-                    f"{project_dir}/input/{config['ref_seq']}", format="fasta"
-                ).seq
-            )
+            try:
+                self.ref_seq = str(
+                    SeqIO.read(
+                        f"{project_dir}/input/{config['ref_seq']}", format="fasta"
+                    ).seq
+                )
+            except ValueError:
+                err_msg = "No or wrong reference sequence file!"
+                raise ValueError()
             if "ref_genes" in config.keys():
                 self.ref_genes = config["ref_genes"]
             else:
@@ -63,12 +66,11 @@ class MappingPipeline:
             self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
 
         except FileNotFoundError:
-            raise FileNotFoundError(f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
-        except ValueError:
-            raise ValueError(
+            raise FileNotFoundError(
                 f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
             )
+        except ValueError:
+            raise ValueError(err_msg)
 
         self.matrices = {}
         try:
@@ -82,6 +84,31 @@ class MappingPipeline:
             )
 
         self.mutations = None
+        self.sample_list = None
+        self.sample_group_dict = None
+        self.group_avg_pos = None
+
+    def get_samples(self, verbose: bool = False):
+        sample_list_in_path = pathlib.Path(f"{self.project_dir}/input/indices").glob(
+            "*sample_list.pkl"
+        )
+        sample_list = []
+        for filename in sample_list_in_path:
+            with open(filename, mode="rb") as in_file:
+                partial_list = pickle.load(in_file)
+            group = filename.stem.split("_")[0]
+            partial_list = [f"{group}_{sample_name}" for sample_name in partial_list]
+            sample_list.extend(partial_list)
+        sample_group_dict = {
+            f"{group}": [
+                sample for sample in sample_list if sample.split("_")[0] == f"{group}"
+            ]
+            for group in self.sample_groups
+        }
+        if len(sample_list) == 0:
+            raise FileNotFoundError("No sample lists found!")
+        self.sample_list = sample_list
+        self.sample_group_dict = sample_group_dict
 
     def _check_bowtie2_path(self):
         return shutil.which("bowtie2")
@@ -119,8 +146,8 @@ class MappingPipeline:
         seed_length = int(math.ceil(self.k / 2))
         map_cmd = [
             f"bowtie2",
-            "-a",
             "--norc",
+            "-a",
             "-L",
             f"{seed_length}",
             "-x",
@@ -160,17 +187,22 @@ class MappingPipeline:
         reads = pysam.AlignmentFile(
             f"{self.project_dir}/temp/enriched_{self.k}mers.sam", mode="r"
         )
+
         read_dict = {
             "kmer": [],
             "flag": [],
             "ref_pos": [],
             "CIGAR": [],
             "n_mismatch": [],
+            "score": [],
         }
         for read in reads:
             read_dict["kmer"].append(read.query_name)
             read_dict["flag"].append(read.flag)
-            read_dict["ref_pos"].append(read.reference_start)
+            if read.reference_start == -1:
+                read_dict["ref_pos"].append(0)
+            else:
+                read_dict["ref_pos"].append(read.reference_start)
             if read.cigarstring == None:
                 read_dict["CIGAR"].append("")
             else:
@@ -179,22 +211,26 @@ class MappingPipeline:
                 read_dict["n_mismatch"].append(read.get_tag("NM", False))
             else:
                 read_dict["n_mismatch"].append(0)
+            if read.has_tag("AS"):
+                read_dict["score"].append(read.get_tag("AS", False))
+            else:
+                read_dict["score"].append(-6 * self.k)
 
         mappings_df = pd.DataFrame(read_dict)
         mappings_df["CIGAR"] = mappings_df["CIGAR"].apply(self._parse_CIGAR)
         mappings_df.loc[:, ["flag", "ref_pos", "n_mismatch"]] = mappings_df.loc[
             :, ["flag", "ref_pos", "n_mismatch"]
         ].astype(int)
+        mappings_df["group"] = self.matrices["enriched"]["group"]
+        mappings_df["mutations"] = "WT"
+        mappings_df["mapping_ok"] = 1
+        mappings_df["ref_pos"] = mappings_df["ref_pos"].apply(
+            lambda pos: pos + 1 if pos > 0 else pos
+        )
         mappings_df["group"] = mappings_df["kmer"].apply(
             lambda kmer: self.matrices["enriched"].loc[kmer, "group"]
         )
         return mappings_df
-
-    def _detect_unmapped_CIGAR(self, CIGAR_list: list) -> bool:
-        if "S" in CIGAR_list or "H" in CIGAR_list or len(CIGAR_list) == 0:
-            return True
-        else:
-            return False
 
     def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
         ref_start = map_pos
@@ -248,11 +284,12 @@ class MappingPipeline:
         ):
             del_group_pos = list(map(operator.itemgetter(1), g))
             dels.append((del_group_pos[0], "del", del_group_pos[-1]))
-
         grouped_muts = subs + inss + dels
+        grouped_muts.sort()
         return grouped_muts
 
     def _find_variants(self, ref_seq, kmer, map_pos, cigar) -> list:
+        map_pos = map_pos-1
         mutations = []
         q_seq, t_seq, ref_pos = self._align_seqs(ref_seq, kmer, map_pos, cigar)
         if len(q_seq) != len(t_seq) != len(ref_pos):
@@ -282,165 +319,57 @@ class MappingPipeline:
             )
         return mutation_as_text
 
-    def analyze_mapping(self, verbose: bool = False):
-        mappings_df = self._read_sam_to_df()
-        mappings_df["mutations"] = "WT"
-        mutations_dict = {}
-        for row in mappings_df.itertuples():
-            if self._detect_unmapped_CIGAR(row.CIGAR) == True:
-                mappings_df.loc[row.Index, ["ref_pos", "n_mismatch"]] = 0
-                mappings_df.loc[row.Index, "mutations"] = "NA"
-                mappings_df.loc[row.Index, "flag"] = 4
-            elif row.n_mismatch > 0:
-                mutations_as_tuples = self._find_variants(
-                    self.ref_seq, row.kmer, row.ref_pos, row.CIGAR
-                )
-                mappings_df.loc[row.Index, "mutations"] = "; ".join(
-                    [self._mutation_tuple_to_text(mut) for mut in mutations_as_tuples]
-                )
-                for mutation in mutations_as_tuples:
-                    mutation_text = self._mutation_tuple_to_text(mutation)
-                    if mutation_text not in mutations_dict.keys():
-                        mutations_dict[mutation_text] = [row.kmer]
-                    else:
-                        mutations_dict[mutation_text].append(row.kmer)
-
-        num_kmers = len(self.matrices["enriched"])
-        num_primary_mappings = len(mappings_df[mappings_df["flag"] == 0])
-        num_secondary_mappings = len(mappings_df[mappings_df["flag"] == 256])
-        num_unmapped = len(mappings_df[mappings_df["flag"] == 4])
-
-        if verbose == True:
-            print(
-                f"\nMapping of {num_kmers} {self.k}-mers resulted in {num_primary_mappings} primary mappings and {num_secondary_mappings} secondary mappings."
-            )
-            print(f"{num_unmapped} {self.k}-mers couldn't be mapped.")
-
-        self.matrices["mappings"] = mappings_df
-        return mutations_dict
-
-    def aggregate_mutations(self, mutations_dict):
-        aggregate_dict = {}
-        for mutation, kmers in mutations_dict.items():
-            aggregate_dict[mutation] = (
-                self.matrices["enriched"].loc[kmers, self.avg_cols].max()
-            )
-        aggregate_df = pd.DataFrame(aggregate_dict).T.fillna(0).sort_index()
-        aggregate_df.to_csv(f"{self.project_dir}/temp/mutations.csv")
-
-    def save_mappings_df(self):
-        print(f"\nSaving {self.k}-mer mappings.")
-        df_to_save = self.matrices["mappings"][
-            ["kmer", "ref_pos", "group", "mutations"]
-        ].copy()
-        df_to_save["ref_pos"] = df_to_save["ref_pos"].apply(
-            lambda pos: pos + 1 if pos > 0 else pos
-        )
-        df_to_save.index.name = "id"
-        df_to_save.sort_values("ref_pos", inplace=True)
-        df_to_save.to_csv(
-            f"{self.project_dir}/output/enriched_{self.k}mers_mappings.csv"
-        )
-
-
-class RefFreePipeline:
-
-    def __init__(self, project_dir: str, k):
-        if os.path.isdir(project_dir) == True:
-            self.project_dir = project_dir
-        else:
-            raise NotADirectoryError("Project directory does not exist!")
-
-        if type(k) != int:
-            raise TypeError("k must by an integer!")
-        else:
-            self.k = k
-
-        try:
-            with open(f"{project_dir}/config.yaml", "r") as config_file:
-                config = yaml.safe_load(config_file)
-            self.sample_groups = config["sample_groups"]
-            self.mode = config["mode"]
-            if self.mode == "ovr":
-                self.goi = config["goi"]
-                self.control_groups = self.sample_groups.copy()
-                self.control_groups.remove(self.goi)
-            elif self.mode == "ava":
-                self.goi = None
-                self.control_groups = None
-            else:
-                raise ValueError(
-                    "Unrecognized analysis mode, should by ava or ovr. Check your config file!"
-                )
-
-        except FileNotFoundError:
-            raise FileNotFoundError(f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
-        except ValueError:
-            raise ValueError(
-                f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
-
-        self.matrices = {}
-        try:
-            self.matrices["enriched"] = pd.read_csv(
-                f"{project_dir}/output/enriched_{self.k}mers_stats.csv", index_col=0
-            )
-
-        except:
-            raise FileNotFoundError(
-                f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK enriched first!"
-            )
-        self.group_distros = None
-        self.sample_list = None
-        self.sample_group_dict = None
-
-    def _get_samples(self, verbose:bool = False):
-        sample_list_in_path = pathlib.Path(f"{self.project_dir}/input/indices").glob(
-            "*sample_list.pkl"
-        )
-        sample_list = []
-        for filename in sample_list_in_path:
-            with open(filename, mode="rb") as in_file:
-                partial_list = pickle.load(in_file)
-            group = filename.stem.split("_")[0]
-            partial_list = [f"{group}_{sample_name}" for sample_name in partial_list]
-            sample_list.extend(partial_list)
-        sample_group_dict = {
-            f"{group}": [
-                sample for sample in sample_list if sample.split("_")[0] == f"{group}"
-            ]
-            for group in self.sample_groups
+    def _load_kmer_pos(
+        self,
+        input_filename: pathlib.Path,
+        kmers: np.ndarray,
+        kmer_distros: dict,
+        verbose: bool = False,
+    ) -> None:
+        with open(input_filename, mode="rb") as in_file:
+            group = f"{input_filename.stem.split('_')[1]}_enriched"
+            temp_dict = pickle.load(in_file)
+        temp_dict = {
+            portek.decode_kmer(id, self.k): positions
+            for id, positions in temp_dict.items()
         }
-        self.sample_list = sample_list
-        self.sample_group_dict = sample_group_dict
-    
-    def get_kmer_pos(self, matrix_type: str, verbose: bool = False):
-        self._get_samples(verbose)
-        print(f"\nGetting {matrix_type} {self.k}-mer position distributions.")
+        kmer_distros[group] = {
+            kmer: positions for kmer, positions in temp_dict.items() if kmer in kmers
+        }
+
+    def _get_total_distros(self, kmer_distros: dict) -> None:
+        total_distros = {}
+        for distros in kmer_distros.values():
+            for kmer, distro in distros.items():
+                if kmer in total_distros.keys():
+                    total_distros[kmer] = total_distros[kmer] + distro
+                else:
+                    total_distros[kmer] = distro
+        kmer_distros["conserved"] = total_distros
+
+    def _get_peaks_from_distro(self, kmer_distros: dict) -> dict:
+        distro_peaks = {group: {} for group in kmer_distros.keys()}
+        for group in distro_peaks.keys():
+            for kmer, distro in kmer_distros[group].items():
+                max_pos = max(max(distro), len(self.ref_seq))
+                bins = max_pos + 1
+                histogram_over_genome = histogram(distro, 0, max_pos, bins)
+                peaks = find_peaks(histogram_over_genome, distance=bins / 10)
+                distro_peaks[group][kmer] = peaks[0]
+        return distro_peaks
+
+    def _get_kmer_peaks(self, mappings_df: pd.DataFrame, verbose: bool = False):
+        print(f"\nLoading enriched {self.k}-mer position distributions.")
         in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
             f"{self.k}mer_*_pos_dict.pkl"
         )
         if verbose == True:
             files_counter = 1
             tot_files = len(self.sample_groups)
-        group_distros = {}
-        group_avg_pos = {}
+        kmer_distros = {}
+        kmers = mappings_df["kmer"].unique()
         for filename in in_path:
-            with open(filename, mode="rb") as in_file:
-                group = filename.stem.split("_")[1]
-                temp_dict = pickle.load(in_file)
-                temp_dict = {portek.decode_kmer(id, self.k):positions for id, positions in temp_dict.items()}
-                kmers = self.matrices["enriched"].index
-                filtered_dict = {kmer:Counter(positions) for kmer, positions in temp_dict.items() if kmer in kmers}
-                ratio_dict = {}
-                avg_pos_dict = {}
-                for kmer, counter in filtered_dict.items():
-                    ratio_dict[kmer] = {position:count/len(self.sample_group_dict[group]) for position,count in counter.items()}
-                    avg_pos_dict[kmer] = sum([pos*ratio for pos,ratio in ratio_dict[kmer].items()])/sum(ratio_dict[kmer].values())
-                group_distros[group] = ratio_dict
-                group_avg_pos[group] = avg_pos_dict
-
+            self._load_kmer_pos(filename, kmers, kmer_distros, verbose)
             if verbose == True:
                 print(
                     f"Loaded {self.k}-mer distributions from {files_counter} of {tot_files} groups.",
@@ -448,14 +377,103 @@ class RefFreePipeline:
                     flush=True,
                 )
                 files_counter += 1
-        self.group_distros = group_distros
-        self.group_avg_pos = group_avg_pos
+        self._get_total_distros(kmer_distros)
+        distro_peaks = self._get_peaks_from_distro(kmer_distros)
+        return distro_peaks
 
-    
-    def save_group_distros(self, verbose:bool = False):
-        group_avg_pos_df = pd.DataFrame(self.group_avg_pos)
-        group_avg_pos_df["group"] = self.matrices["enriched"]["group"]
+    def _get_real_pos(
+        self, group: str, kmer: str, ref_pos: int, actual_positions: dict
+    ) -> int:
+        peaks = actual_positions[group][kmer]
+        diffs = abs(peaks - ref_pos)
+        return peaks[np.argmin(diffs)]
+
+    def _get_n_peaks(
+        self, group: str, kmer: str, ref_pos: int, actual_positions: dict
+    ) -> int:
+        peaks = actual_positions[group][kmer]
+        return len(peaks)
+
+    def _resolve_multiple_mappings(self, mappings_df: pd.DataFrame) -> pd.Index:
+        multimapped_kmers = np.unique(
+            mappings_df[mappings_df["flag"] == 256]["kmer"].to_numpy()
+        )
+        bad_mappings = pd.Index([])
+        for kmer in multimapped_kmers:
+            kmer_sub_df = mappings_df.loc[mappings_df["kmer"] == kmer].copy()
+            kmer_sub_df["pos_diff"] = abs(
+                kmer_sub_df["ref_pos"] - kmer_sub_df["real_pos"]
+            )
+            kmer_sub_df.sort_values(
+                ["score", "pos_diff"], ascending=[False, True], inplace=True
+            )
+            n_peaks = kmer_sub_df["n_peaks"].values[0]
+            bad_mappings = bad_mappings.union(kmer_sub_df.iloc[n_peaks:].index)
+        return bad_mappings
+
+    def _filter_mappings(self, mappings_df: pd.DataFrame):
+        bad_mappings = self._resolve_multiple_mappings(mappings_df)
+        mappings_df.loc[bad_mappings, "mapping_ok"] = 0
+        mappings_df = mappings_df[mappings_df["mapping_ok"] == 1]
+        return mappings_df
+
+    def _format_mappings_df(self, mappings_df: pd.DataFrame):
+        mappings_df.loc[mappings_df["flag"] == 4, "mutations"] = "-"
+        mappings_df.loc[mappings_df["flag"] == 4, "n_mismatch"] = self.k
+        formatted_df = mappings_df.drop(
+            ["flag", "CIGAR", "score", "mapping_ok", "real_pos", "n_peaks"],
+            axis=1
+        ).sort_values("ref_pos")
+        return formatted_df
+
+    def _count_mappings(self, mappings_df: pd.DataFrame):
+        num_kmers = len(self.matrices["enriched"])
+        validly_aln_kmers = mappings_df[mappings_df["flag"] != 4]["kmer"].to_numpy()
+        num_aligned = len(np.unique(validly_aln_kmers))
+        num_multiple = len(validly_aln_kmers) - num_aligned
+        num_unaligned = num_kmers - num_aligned
+        print(
+            f"\n{num_aligned} out of {num_kmers} {self.k}-mers were aligned to the reference."
+        )
+        print(f"Of those, {num_multiple} were aligned to more than one position.")
+        print(f"{num_unaligned} {self.k}-mers couldn't be aligned.")
+
+    def analyze_mapping(self, verbose: bool = False):
+        mappings_df = self._read_sam_to_df()
+        actual_positions = self._get_kmer_peaks(mappings_df, verbose)
+        mappings_df["real_pos"] = mappings_df.apply(
+            lambda row: self._get_real_pos(
+                row["group"], row["kmer"], row["ref_pos"], actual_positions
+            ),
+            axis=1,
+        )
+        mappings_df["n_peaks"] = mappings_df.apply(
+            lambda row: self._get_n_peaks(
+                row["group"], row["kmer"], row["ref_pos"], actual_positions
+            ),
+            axis=1,
+        )
+        filtered_df = self._filter_mappings(mappings_df)
+        for row in filtered_df.itertuples():
+            if row.n_mismatch > 0:
+                mutations_as_tuples = self._find_variants(
+                    self.ref_seq, row.kmer, row.ref_pos, row.CIGAR
+                )
+                filtered_df.loc[row.Index, "mutations"] = "; ".join(
+                    [self._mutation_tuple_to_text(mut) for mut in mutations_as_tuples]
+                )
+
         if verbose == True:
-            print(f"\nSaving average positions of {len(group_avg_pos_df)} {self.k}-mers.")
-        group_avg_pos_df.to_csv(f"{self.project_dir}/temp/group_avg_pos.csv")
+            self._count_mappings(filtered_df)
 
+        formatted_df = self._format_mappings_df(filtered_df)
+        self.matrices["mappings"] = formatted_df
+
+
+    def save_mappings_df(self):
+        print(f"\nSaving {self.k}-mer mappings.")
+        df_to_save = self.matrices["mappings"].copy()
+        df_to_save.index.name = "id"
+        df_to_save.to_csv(
+            f"{self.project_dir}/output/enriched_{self.k}mers_mappings.csv"
+        )
