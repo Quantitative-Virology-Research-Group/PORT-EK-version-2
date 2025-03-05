@@ -224,8 +224,8 @@ class MappingPipeline:
         mappings_df["group"] = self.matrices["enriched"]["group"]
         mappings_df["mutations"] = "WT"
         mappings_df["mapping_ok"] = 1
-        mappings_df["ref_pos"] = mappings_df["ref_pos"].apply(
-            lambda pos: pos + 1 if pos > 0 else pos
+        mappings_df["ref_pos"] = mappings_df.apply(
+            lambda row: row["ref_pos"] + 1 if row["flag"] != 4 else row["ref_pos"], axis=1
         )
         mappings_df["group"] = mappings_df["kmer"].apply(
             lambda kmer: self.matrices["enriched"].loc[kmer, "group"]
@@ -294,7 +294,7 @@ class MappingPipeline:
         q_seq, t_seq, ref_pos = self._align_seqs(ref_seq, kmer, map_pos, cigar)
         if len(q_seq) != len(t_seq) != len(ref_pos):
             raise ValueError(
-                f"Improper alingment of k-mer {q_seq} and reference {t_seq}"
+                f"Improper alingment of k-mer {q_seq}, reference {t_seq}, and refrence position {ref_pos}"
             )
         for i in range(len(q_seq)):
             if q_seq[i] != t_seq[i]:

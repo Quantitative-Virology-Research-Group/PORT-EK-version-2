@@ -69,6 +69,43 @@ class EnrichedKmersPipeline:
         self.p_cols = None
         self.matrices = {}
 
+    def _filter_by_entropy_and_freq(self, matrix:pd.DataFrame, min_F:float = None) -> pd.DataFrame:
+        tot_samples = len(self.sample_list)
+        matrix["F"] = matrix[self.c_cols].sum(axis=1) / tot_samples
+
+        with np.errstate(divide="ignore"):
+            matrix["H"] = np.where(
+                matrix["F"] == 1,
+                0,
+                -(
+                    matrix["F"] * np.log2(matrix["F"])
+                    + (1 - matrix["F"]) * np.log2(1 - matrix["F"])
+                ),
+            )
+
+        if min_F == None:
+            min_F = 2/tot_samples
+        min_H = -(min_F * np.log2(min_F) + (1 - min_F) * np.log2(1 - min_F))
+        common_kmer_matrix = matrix.loc[
+            (matrix["H"] >= min_H) | (matrix["F"] >= (1 - min_F))
+        ]
+        non_singles = len(common_kmer_matrix)
+
+        print(
+            f"{non_singles} {self.k}-mers passed the entropy filter."
+        )
+
+        if non_singles * len(self.sample_list) > 2*(2**30):
+            common_kmer_matrix = common_kmer_matrix[
+                ((common_kmer_matrix[self.freq_cols] > 0.1).sum(axis=1))>0
+            ]
+            print(
+                f"The resulting count matrix would take over 2 GB of memory. Removing additional {non_singles-len(common_kmer_matrix)} rare {self.k}-mers."
+            )
+            print(f"{len(common_kmer_matrix)} {self.k}-mers remaining.")
+
+        return common_kmer_matrix
+    
     def get_basic_kmer_stats(self, save_rare: bool = False):
 
         kmer_set = set()
@@ -113,7 +150,6 @@ class EnrichedKmersPipeline:
         group_len_dict = {
             f"{group}": len(sample_group_dict[group]) for group in self.sample_groups
         }
-        tot_samples = len(sample_list)
 
         self.kmer_set = kmer_set
         self.sample_list = sample_list
@@ -147,35 +183,7 @@ class EnrichedKmersPipeline:
                 all_kmer_matrix[freq_col] * group_len_dict[group], 0
             )
 
-        all_kmer_matrix["F"] = all_kmer_matrix[self.c_cols].sum(axis=1) / tot_samples
-
-        with np.errstate(divide="ignore"):
-            all_kmer_matrix["H"] = np.where(
-                all_kmer_matrix["F"] == 1,
-                0,
-                -(
-                    all_kmer_matrix["F"] * np.log2(all_kmer_matrix["F"])
-                    + (1 - all_kmer_matrix["F"]) * np.log2(1 - all_kmer_matrix["F"])
-                ),
-            )
-        min_F = 2 / tot_samples
-        min_H = -(min_F * np.log2(min_F) + (1 - min_F) * np.log2(1 - min_F))
-        common_kmer_matrix = all_kmer_matrix.loc[
-            (all_kmer_matrix["H"] >= min_H) | (all_kmer_matrix["F"] >= (1 - min_F))
-        ]
-        non_singles = len(common_kmer_matrix)
-        print(
-            f"{non_singles} {self.k}-mers passed the entropy filter."
-        )
-
-        if non_singles * len(sample_list) > 2*(2**30):
-            common_kmer_matrix = common_kmer_matrix[
-                (common_kmer_matrix[self.freq_cols] > 0.1).product(axis=1).astype(bool)
-            ]
-            print(
-                f"The resulting count matrix would take over 2 GB of memory. Removing additional {non_singles-len(common_kmer_matrix)} rare {self.k}-mers."
-            )
-            print(f"{len(common_kmer_matrix)} {self.k}-mers remaining.")
+        common_kmer_matrix = self._filter_by_entropy_and_freq(all_kmer_matrix)
         self.matrices["common"] = common_kmer_matrix
         if save_rare == True:
             rare_kmer_matrix = all_kmer_matrix.loc[

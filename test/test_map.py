@@ -511,7 +511,7 @@ class TestMappingPipeline_readSAMToDf:
         mock_read.flag = 0
         mock_read.reference_start = 10
         mock_read.cigarstring = "10M"
-        mock_read.get_tag.side_effect = lambda tag, _: {"NM": 1, "AS": 30}.get(
+        mock_read.get_tag.side_effect = lambda tag, _: {"NM": 1, "AS": 0}.get(
             tag, None
         )
         mock_alignment_file.return_value.__iter__.return_value = [mock_read]
@@ -529,7 +529,7 @@ class TestMappingPipeline_readSAMToDf:
                 "ref_pos": [11],
                 "CIGAR": [["M"] * 10],
                 "n_mismatch": [1],
-                "score": [30],
+                "score": [0],
                 "group": ["group1"],
                 "mutations": ["WT"],
                 "mapping_ok": [1],
@@ -538,6 +538,41 @@ class TestMappingPipeline_readSAMToDf:
         pd.testing.assert_frame_equal(df, expected_df)
 
     @patch("pysam.AlignmentFile")
+    def test_read_sam_to_df_ref_pos_1(
+        self, mock_alignment_file, mock_proper_mapping_pipeline
+    ):
+        # Setup
+        mock_read = MagicMock()
+        mock_read.query_name = "AAAAA"
+        mock_read.flag = 0
+        mock_read.reference_start = 0
+        mock_read.cigarstring = "10M"
+        mock_read.get_tag.side_effect = lambda tag, _: {"NM": 1, "AS": 0}.get(
+            tag, None
+        )
+        mock_alignment_file.return_value.__iter__.return_value = [mock_read]
+
+        pipeline = mock_proper_mapping_pipeline
+
+        # Execute
+        df = pipeline._read_sam_to_df()
+
+        # Verify
+        expected_df = pd.DataFrame(
+            {
+                "kmer": ["AAAAA"],
+                "flag": [0],
+                "ref_pos": [1],
+                "CIGAR": [["M"] * 10],
+                "n_mismatch": [1],
+                "score": [0],
+                "group": ["group1"],
+                "mutations": ["WT"],
+                "mapping_ok": [1],
+            }
+        )
+        pd.testing.assert_frame_equal(df, expected_df)
+    @patch("pysam.AlignmentFile")
     def test_read_sam_to_df_no_aln(
         self, mock_alignment_file, mock_proper_mapping_pipeline
     ):
@@ -545,7 +580,7 @@ class TestMappingPipeline_readSAMToDf:
         mock_read = MagicMock()
         mock_read.query_name = "AAAAA"
         mock_read.flag = 4
-        mock_read.reference_start = -1
+        mock_read.reference_start = 0
         mock_read.cigarstring = None
         mock_read.has_tag.return_value = False
         mock_alignment_file.return_value.__iter__.return_value = [mock_read]
