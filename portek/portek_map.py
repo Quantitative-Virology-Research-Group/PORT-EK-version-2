@@ -8,9 +8,11 @@ import shutil
 import subprocess
 
 import numpy as np
+import matplotlib.pyplot as plt
 import pandas as pd
 import pysam
 import regex
+import seaborn as sns
 import yaml
 from Bio import SeqIO
 from scipy.stats import linregress
@@ -419,7 +421,7 @@ class MappingPipeline:
         mappings_df.loc[bad_mappings, "mapping_ok"] = 0
         mappings_df = mappings_df[mappings_df["mapping_ok"] == 1]
         if verbose == True:
-            print(f"Rejected {len(bad_mappings)} dubious alignments.")
+            print(f"\nRejected {len(bad_mappings)} dubious alignments.")
         return mappings_df
 
     def _predict_unmapped(self, mappings_df: pd.DataFrame) -> pd.DataFrame:
@@ -504,6 +506,20 @@ class MappingPipeline:
         formatted_df = self._format_mappings_df(mappings_with_pred_df)
         self.matrices["mappings"] = formatted_df
 
+    def plot_kmer_histograms(self):
+        groups = self.matrices["mappings"]["group"].unique()
+        n_figs = len(groups)
+        fig_cols = min(n_figs,3)
+        fig_rows = (n_figs//fig_cols)+1
+        fig, axes = plt.subplots(fig_rows, fig_cols,figsize=(fig_cols * 6, fig_rows * 6))
+        plt.subplots_adjust(hspace=0.25, wspace=0.25)
+        for i, group in enumerate(groups):
+            data = self.matrices["mappings"].loc[self.matrices["mappings"]["group"] == group, "ref_pos"]
+            if len(axes.shape) == 1:
+                sns.histplot(data=data, ax=axes[i])
+            else:
+                sns.histplot(data=data, ax=axes[i // fig_cols, i % fig_cols])
+        plt.show()
 
     def save_mappings_df(self):
         print(f"\nSaving {self.k}-mer mappings.")
