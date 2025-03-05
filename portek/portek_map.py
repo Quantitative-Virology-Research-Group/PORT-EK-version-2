@@ -13,6 +13,7 @@ import pysam
 import regex
 import yaml
 from Bio import SeqIO
+from scipy.stats import linregress
 from scipy.ndimage import histogram
 from scipy.signal import find_peaks
 
@@ -411,17 +412,41 @@ class MappingPipeline:
             bad_mappings = bad_mappings.union(kmer_sub_df.iloc[n_peaks:].index)
         return bad_mappings
 
-    def _filter_mappings(self, mappings_df: pd.DataFrame):
+    def _filter_mappings(self, mappings_df: pd.DataFrame)-> pd.DataFrame:
         bad_mappings = self._resolve_multiple_mappings(mappings_df)
         mappings_df.loc[bad_mappings, "mapping_ok"] = 0
         mappings_df = mappings_df[mappings_df["mapping_ok"] == 1]
         return mappings_df
 
-    def _format_mappings_df(self, mappings_df: pd.DataFrame):
+    def _predict_unmapped(self, mappings_df: pd.DataFrame, window:int = 1000) -> pd.DataFrame:
+        mapped = mappings_df[mappings_df["ref_pos"] != 0].index
+        if len(mapped) < 30:
+            print("Not enough mapped k-mers for position prediction, skipping.")
+            mappings_df["pred_pos"] = 0
+            mappings_df["pred_err"] = 0.0
+            return mappings_df
+        
+        real_mapped_pos = mappings_df.loc[mapped, "real_pos"]
+        ref_mapped_pos = mappings_df.loc[mapped, "ref_pos"]
+        regress = linregress(real_mapped_pos, ref_mapped_pos)
+        mappings_df["pred_pos"] = round(regress.slope*mappings_df["real_pos"]+regress.intercept).astype(int)
+        pred_mapped_err = mappings_df.loc[mapped, "pred_pos"]-ref_mapped_pos
+        perpos_err =[]
+        for pos in range(1, mappings_df["pred_pos"].max()+1):
+            errs = pred_mapped_err[(mappings_df["pred_pos"] > pos-window//2) & (mappings_df["pred_pos"] < pos+window//2)]
+            if len(errs) == 0:
+                perpos_err.append(-1)
+            else:
+                perpos_err.append(np.sqrt(sum(errs**2)/len(errs)))
+        perpos_err = np.array(perpos_err)
+        mappings_df[f"pred_err"] = perpos_err[mappings_df["pred_pos"]-1]
+        return mappings_df
+    
+    def _format_mappings_df(self, mappings_df: pd.DataFrame) -> pd.DataFrame:
         mappings_df.loc[mappings_df["flag"] == 4, "mutations"] = "-"
         mappings_df.loc[mappings_df["flag"] == 4, "n_mismatch"] = self.k
         formatted_df = mappings_df.drop(
-            ["flag", "CIGAR", "score", "mapping_ok", "real_pos", "n_peaks"],
+            ["flag", "CIGAR", "score", "mapping_ok", "n_peaks", "real_pos"],
             axis=1
         ).sort_values("ref_pos")
         return formatted_df
@@ -465,7 +490,7 @@ class MappingPipeline:
 
         if verbose == True:
             self._count_mappings(filtered_df)
-
+        mappings_with_pred_df = self._predict_unmapped(filtered_df)
         formatted_df = self._format_mappings_df(filtered_df)
         self.matrices["mappings"] = formatted_df
 

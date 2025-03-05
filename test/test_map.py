@@ -1380,6 +1380,56 @@ class TestMappingPipeline_formatMappingsDf:
         pd.testing.assert_frame_equal(formatted_df, expected_df)
 
 
+class TestMappingPipelinePredictUnmapped:
+
+    @patch("portek.portek_map.MappingPipeline._read_sam_to_df")
+    def test_predict_unmapped_success(self, mock_read_sam_to_df, mock_proper_mapping_pipeline):
+        # Setup
+        mock_read_sam_to_df.return_value = pd.DataFrame({
+            "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"]*10,
+            "flag": [0, 0, 0, 4]*10,
+            "ref_pos": [10, 20, 30, 0]*10,
+            "real_pos": [11, 21, 31, 0]*10,
+            "n_mismatch": [0, 0, 0, 0]*10,
+            "score": [0, 0, 0, -30]*10,
+            "group": ["group1", "group1", "group1", "group1"]*10,
+            "mutations": ["WT", "WT", "WT", "WT"]*10,
+            "mapping_ok": [1, 1, 1, 1]*10
+        })
+        pipeline = mock_proper_mapping_pipeline
+
+        # Execute
+        result_df = pipeline._predict_unmapped(mock_read_sam_to_df.return_value, window=2)
+
+        # Verify
+        assert "pred_pos" in result_df.columns
+        assert "pred_err" in result_df.columns
+
+    @patch("portek.portek_map.MappingPipeline._read_sam_to_df")
+    def test_predict_unmapped_no_mapped(self, mock_read_sam_to_df, mock_proper_mapping_pipeline):
+        # Setup
+        mock_read_sam_to_df.return_value = pd.DataFrame({
+            "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"]*10,
+            "flag": [4, 4, 4, 4]*10,
+            "ref_pos": [0, 0, 0, 0]*10,
+            "real_pos": [0, 0, 0, 0]*10,
+            "n_mismatch": [3, 3, 3, 3]*10,
+            "score": [-30, -30, -30, -30]*10,
+            "group": ["group1", "group1", "group1", "group1"]*10,
+            "mutations": ["WT", "WT", "WT", "WT"]*10,
+            "mapping_ok": [1, 1, 1, 1]*10
+        })
+        pipeline = mock_proper_mapping_pipeline
+
+        # Execute
+        result_df = pipeline._predict_unmapped(mock_read_sam_to_df.return_value, window=2)
+
+        # Verify
+        assert "pred_pos" in result_df.columns
+        assert result_df["pred_pos"].sum() == 0
+        assert "pred_err" in result_df.columns
+        assert result_df["pred_pos"].sum() == 0.0
+
 class TestMappingPipeline_countMappings:
     def test_count_mappings_all_aligned(self, mock_proper_mapping_pipeline, capsys):
         # Setup
