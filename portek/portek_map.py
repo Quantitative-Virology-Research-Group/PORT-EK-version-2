@@ -342,11 +342,12 @@ class MappingPipeline:
             portek.decode_kmer(id, self.k): positions
             for id, positions in temp_dict.items()
         }
+        distro = {
+            kmer: temp_dict[kmer] for kmer in kmers if kmer in temp_dict.keys()
+        }
         if verbose == True:
             print(f"Done loading k-mer positions from file {input_filename.stem}.")
-        return group,{
-            kmer: positions for kmer, positions in temp_dict.items() if kmer in kmers
-        }
+        return group, distro
 
     def _get_total_distros(self, kmer_distros: dict) -> None:
         total_distros = {}
@@ -487,9 +488,9 @@ class MappingPipeline:
         print(f"Of those, {num_multiple} were aligned to more than one position.")
         print(f"{num_unaligned} {self.k}-mers couldn't be aligned.")
 
-    def analyze_mapping(self, verbose: bool = False):
+    def analyze_mapping(self, n_jobs:int=4,verbose: bool = False):
         mappings_df = self._read_sam_to_df()
-        actual_positions = self._get_kmer_peaks(mappings_df, verbose)
+        actual_positions = self._get_kmer_peaks(mappings_df, n_jobs,verbose)
         mappings_df["real_pos"] = mappings_df.apply(
             lambda row: self._get_real_pos(
                 row["group"], row["kmer"], row["ref_pos"], actual_positions

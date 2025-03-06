@@ -115,7 +115,7 @@ def main():
         mapping_pipeline = portek.MappingPipeline(args.project_dir, args.k)
         mapping_pipeline.get_samples(verbose=args.verbose)
         mapping_pipeline.run_mapping(verbose=args.verbose)
-        mapping_pipeline.analyze_mapping(verbose=args.verbose)
+        mapping_pipeline.analyze_mapping(n_jobs=args.n_jobs, verbose=args.verbose)
         mapping_pipeline.save_mappings_df()
         mapping_pipeline.plot_kmer_histograms()
         end_timeS_ARE_NOT_CANON = datetime.now()
