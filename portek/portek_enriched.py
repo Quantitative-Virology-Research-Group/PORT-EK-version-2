@@ -198,7 +198,7 @@ class EnrichedKmersPipeline:
         self, matrix_type: str, group1: str, group2: str, verbose: bool = False
     ) -> tuple[str, str, pd.Series, pd.Series, pd.Series]:
         if verbose == True:
-            print(f"Start calculating differences for groups {group1} and {group2}.")
+            print(f"Calculating differences for groups {group1} and {group2}.")
         avg_counts_i = self.matrices[matrix_type][f"{group1}_avg"]
         avg_counts_j = self.matrices[matrix_type][f"{group2}_avg"]
         errors = avg_counts_i - avg_counts_j
