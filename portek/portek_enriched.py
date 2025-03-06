@@ -52,9 +52,10 @@ class EnrichedKmersPipeline:
             self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
             self.c_cols = [f"{group}_c" for group in self.sample_groups]
             self.f_cols = [f"{group}_f" for group in self.sample_groups]
-            
+
         except FileNotFoundError:
-            raise FileNotFoundError(f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
+            raise FileNotFoundError(
+                f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
             )
         except ValueError:
             raise ValueError(
@@ -69,7 +70,9 @@ class EnrichedKmersPipeline:
         self.p_cols = None
         self.matrices = {}
 
-    def _filter_by_entropy_and_freq(self, matrix:pd.DataFrame, min_F:float = None) -> pd.DataFrame:
+    def _filter_by_entropy_and_freq(
+        self, matrix: pd.DataFrame, min_F: float = None
+    ) -> pd.DataFrame:
         tot_samples = len(self.sample_list)
         matrix["F"] = matrix[self.c_cols].sum(axis=1) / tot_samples
 
@@ -84,20 +87,18 @@ class EnrichedKmersPipeline:
             )
 
         if min_F == None:
-            min_F = 2/tot_samples
+            min_F = 2 / tot_samples
         min_H = -(min_F * np.log2(min_F) + (1 - min_F) * np.log2(1 - min_F))
         common_kmer_matrix = matrix.loc[
             (matrix["H"] >= min_H) | (matrix["F"] >= (1 - min_F))
         ]
         non_singles = len(common_kmer_matrix)
 
-        print(
-            f"{non_singles} {self.k}-mers passed the entropy filter."
-        )
+        print(f"{non_singles} {self.k}-mers passed the entropy filter.")
 
-        if non_singles * len(self.sample_list) > 2*(2**30):
+        if non_singles * len(self.sample_list) > 2 * (2**30):
             common_kmer_matrix = common_kmer_matrix[
-                ((common_kmer_matrix[self.freq_cols] > 0.1).sum(axis=1))>0
+                ((common_kmer_matrix[self.freq_cols] > 0.1).sum(axis=1)) > 0
             ]
             print(
                 f"The resulting count matrix would take over 2 GB of memory. Removing additional {non_singles-len(common_kmer_matrix)} rare {self.k}-mers."
@@ -105,7 +106,7 @@ class EnrichedKmersPipeline:
             print(f"{len(common_kmer_matrix)} {self.k}-mers remaining.")
 
         return common_kmer_matrix
-    
+
     def get_basic_kmer_stats(self, save_rare: bool = False):
 
         kmer_set = set()
@@ -193,7 +194,27 @@ class EnrichedKmersPipeline:
             ]
             self.matrices["rare"] = rare_kmer_matrix
 
-    def calc_kmer_stats(self, matrix_type: str, verbose: bool = False):
+    def _compare_group_pair(
+        self, matrix_type: str, group1: str, group2: str, verbose: bool = False
+    ) -> tuple[str, str, pd.Series, pd.Series, pd.Series]:
+        avg_counts_i = self.matrices[matrix_type][f"{group1}_avg"]
+        avg_counts_j = self.matrices[matrix_type][f"{group2}_avg"]
+        errors = avg_counts_i - avg_counts_j
+        group1_samples = self.sample_group_dict[group1]
+        group2_samples = self.sample_group_dict[group2]
+        p_values = self.matrices[matrix_type].apply(
+            lambda row: stats.mannwhitneyu(
+                row[group1_samples], row[group2_samples]
+            ).pvalue,
+            axis=1,
+        )
+        with np.errstate(divide="ignore"):
+            log_p_values = -np.log10(p_values)
+        if verbose == True:
+            print(f"Done calculating differences for groups {group1} and {group2}.")
+        return group1, group2, errors, p_values, log_p_values
+
+    def calc_kmer_stats(self, matrix_type: str, n_jobs: int = 4, verbose: bool = False):
         print(f"\nGetting {matrix_type} {self.k}-mer counts.")
         count_df = pd.DataFrame(
             0,
@@ -225,40 +246,35 @@ class EnrichedKmersPipeline:
                 )
                 counter += 1
         print(f"\nIdentifying enriched {self.k}-mers.")
+
         if self.mode == "ava":
+            group_pairs = []
             err_cols = []
             p_cols = []
             for j in range(1, len(self.sample_groups)):
                 for i in range(j):
-                    err_name = f"{self.sample_groups[i]}-{self.sample_groups[j]}_err"
-                    p_name = f"{self.sample_groups[i]}-{self.sample_groups[j]}_p-value"
-                    err_cols.append(err_name)
-                    p_cols.append(p_name)
-                    avg_counts_i = self.matrices[matrix_type][
-                        f"{self.sample_groups[i]}_avg"
-                    ]
-                    avg_counts_j = self.matrices[matrix_type][
-                        f"{self.sample_groups[j]}_avg"
-                    ]
-                    self.matrices[matrix_type][err_name] = avg_counts_i - avg_counts_j
-                    self.matrices[matrix_type][p_name] = self.matrices[
-                        matrix_type
-                    ].index.map(
-                        lambda id: portek.calc_kmer_pvalue(
-                            id,
-                            self.sample_group_dict[self.sample_groups[i]],
-                            self.sample_group_dict[self.sample_groups[j]],
-                            self.matrices[matrix_type],
-                            self.freq_cols,
-                            err_cols,
+                    group_pairs.append(
+                        (
+                            matrix_type,
+                            self.sample_groups[i],
+                            self.sample_groups[j],
+                            verbose,
                         )
                     )
-                    with np.errstate(divide="ignore"):
-                        self.matrices[matrix_type][f"-log10_{p_name}"] = -np.log10(
-                            self.matrices[matrix_type][p_name]
-                        )
-                    if verbose == True:
-                        print(f"Done calculating differences for groups {self.sample_groups[i]} and {self.sample_groups[j]}.")
+
+            with multiprocessing.get_context("forkserver").Pool(n_jobs) as pool:
+                results = pool.starmap(
+                    self._compare_group_pair, group_pairs, chunksize=1
+                )
+
+            for result in results:
+                err_name = f"{result[0]}-{result[1]}_err"
+                p_name = f"{result[0]}-{result[1]}_p-value"
+                err_cols.append(err_name)
+                p_cols.append(p_name)
+                self.matrices[matrix_type][err_name] = result[2]
+                self.matrices[matrix_type][p_name] = result[3]
+                self.matrices[matrix_type][f"-log10_{p_name}"] = result[4]
 
             self.matrices[matrix_type]["RMSE"] = np.sqrt(
                 ((self.matrices[matrix_type][err_cols]) ** 2).mean(axis=1)
@@ -279,34 +295,59 @@ class EnrichedKmersPipeline:
             ].apply(portek.check_exclusivity, avg_cols=self.avg_cols, axis=1)
 
         elif self.mode == "ovr":
+            group_pairs = []
             err_cols = []
             p_cols = []
             for group in self.control_groups:
-                err_name = f"{self.goi}-{group}_err"
-                p_name = f"{self.goi}-{group}_p-value"
-                err_cols.append(err_name)
-                p_cols.append(p_name)
-                avg_counts_goi = self.matrices[matrix_type][f"{self.goi}_avg"]
-                avg_counts_j = self.matrices[matrix_type][f"{group}_avg"]
-                self.matrices[matrix_type][err_name] = avg_counts_goi - avg_counts_j
-                self.matrices[matrix_type][p_name] = self.matrices[
-                    matrix_type
-                ].index.map(
-                    lambda id: portek.calc_kmer_pvalue(
-                        id,
-                        self.sample_group_dict[self.goi],
-                        self.sample_group_dict[group],
-                        self.matrices[matrix_type],
-                        self.freq_cols,
-                        err_cols,
+                group_pairs.append(
+                    (
+                        matrix_type,
+                        self.goi,
+                        group,
+                        verbose,
                     )
                 )
-                self.matrices[matrix_type][f"-log10_{p_name}"] = -np.log10(
-                    self.matrices[matrix_type][p_name]
+                
+            with multiprocessing.get_context("forkserver").Pool(n_jobs) as pool:
+                results = pool.starmap(
+                    self._compare_group_pair, group_pairs, chunksize=1
                 )
-                if verbose == True:
-                    print(f"Done calculating differences for group of interest {self.goi} and control group {group}.")
-                                        
+
+            for result in results:
+                err_name = f"{result[0]}-{result[1]}_err"
+                p_name = f"{result[0]}-{result[1]}_p-value"
+                err_cols.append(err_name)
+                p_cols.append(p_name)
+                self.matrices[matrix_type][err_name] = result[2]
+                self.matrices[matrix_type][p_name] = result[3]
+                self.matrices[matrix_type][f"-log10_{p_name}"] = result[4]
+                # err_name = f"{self.goi}-{group}_err"
+                # p_name = f"{self.goi}-{group}_p-value"
+                # err_cols.append(err_name)
+                # p_cols.append(p_name)
+                # avg_counts_goi = self.matrices[matrix_type][f"{self.goi}_avg"]
+                # avg_counts_j = self.matrices[matrix_type][f"{group}_avg"]
+                # self.matrices[matrix_type][err_name] = avg_counts_goi - avg_counts_j
+                # self.matrices[matrix_type][p_name] = self.matrices[
+                #     matrix_type
+                # ].index.map(
+                #     lambda id: portek.calc_kmer_pvalue(
+                #         id,
+                #         self.sample_group_dict[self.goi],
+                #         self.sample_group_dict[group],
+                #         self.matrices[matrix_type],
+                #         self.freq_cols,
+                #         err_cols,
+                #     )
+                # )
+                # self.matrices[matrix_type][f"-log10_{p_name}"] = -np.log10(
+                #     self.matrices[matrix_type][p_name]
+                # )
+                # if verbose == True:
+                #     print(
+                #         f"Done calculating differences for group of interest {self.goi} and control group {group}."
+                #     )
+
             self.matrices[matrix_type]["RMSE"] = np.sqrt(
                 ((self.matrices[matrix_type][err_cols]) ** 2).mean(axis=1)
             )
@@ -355,7 +396,7 @@ class EnrichedKmersPipeline:
                 s=10,
                 linewidth=0,
                 hue="group",
-                alpha=0.5
+                alpha=0.5,
             )
             plt.savefig(
                 f"{self.project_dir}/output/{err}_{matrix_type}_{self.k}mers_volcano.svg",
@@ -467,8 +508,12 @@ class EnrichedKmersPipeline:
             out_filename = (
                 f"{self.project_dir}/output/{matrix_type}_{self.k}mers_stats.csv"
             )
-            export_cols = self.avg_cols+list(itertools.chain(*zip(self.err_cols, self.p_cols)))+['RMSE', "group","exclusivity"]
-            self.matrices[matrix_type].loc[:,export_cols].to_csv(
+            export_cols = (
+                self.avg_cols
+                + list(itertools.chain(*zip(self.err_cols, self.p_cols)))
+                + ["RMSE", "group", "exclusivity"]
+            )
+            self.matrices[matrix_type].loc[:, export_cols].to_csv(
                 out_filename, index_label="kmer"
             )
 
@@ -477,8 +522,15 @@ class EnrichedKmersPipeline:
             ids = []
             kmers = []
             for kmer in self.matrices["enriched"].index:
-                count = int(round(self.matrices["enriched"].loc[kmer, f"{group}_avg"]*len(self.sample_group_dict[group])))
-                kmers.extend([kmer]*count)
+                count = int(
+                    round(
+                        self.matrices["enriched"].loc[kmer, f"{group}_avg"]
+                        * len(self.sample_group_dict[group])
+                    )
+                )
+                kmers.extend([kmer] * count)
                 for i in range(count):
                     ids.append(f"{kmer}{i}")
-            portek.save_kmers_fasta(kmers=kmers, ids=ids, name=group, directory=self.project_dir, k=self.k)
+            portek.save_kmers_fasta(
+                kmers=kmers, ids=ids, name=group, directory=self.project_dir, k=self.k
+            )

@@ -23,11 +23,11 @@ class TestMappingPipelineInit:
         mock_yaml_load,
         mock_open,
         mock_isdir,
-        mock_config,
+        mock_config_ava,
         mock_enriched_csv,
     ):
         mock_isdir.return_value = True
-        mock_yaml_load.return_value = mock_config
+        mock_yaml_load.return_value = mock_config_ava
         mock_read_csv.return_value = mock_enriched_csv
         mock_seqio_read.return_value.seq = "ATGC"
 
@@ -36,9 +36,9 @@ class TestMappingPipelineInit:
         assert pipeline.project_dir == "/fake/dir"
         assert pipeline.k == 5
         assert pipeline.sample_groups == ["group1", "group2"]
-        assert pipeline.mode == "ovr"
-        assert pipeline.goi == "group1"
-        assert pipeline.control_groups == ["group2"]
+        assert pipeline.mode == "ava"
+        assert pipeline.goi == None
+        assert pipeline.control_groups == None
         assert pipeline.ref_seq_name == "reference"
         assert pipeline.ref_seq == "ATGC"
         assert pipeline.ref_genes == ["gene1", "gene2"]
@@ -71,11 +71,11 @@ class TestMappingPipelineInit:
     @patch("builtins.open", new_callable=mock_open)
     @patch("yaml.safe_load")
     def test_init_invalid_mode(
-        self, mock_yaml_load, mock_open, mock_isdir, mock_config
+        self, mock_yaml_load, mock_open, mock_isdir, mock_config_ava
     ):
         mock_isdir.return_value = True
-        mock_config["mode"] = "invalid_mode"
-        mock_yaml_load.return_value = mock_config
+        mock_config_ava["mode"] = "invalid_mode"
+        mock_yaml_load.return_value = mock_config_ava
         with pytest.raises(ValueError):
             MappingPipeline("/fake/dir", 5)
 
@@ -91,11 +91,11 @@ class TestMappingPipelineInit:
         mock_yaml_load,
         mock_open,
         mock_isdir,
-        mock_config,
+        mock_config_ava,
         mock_enriched_csv,
     ):
         mock_isdir.return_value = True
-        mock_yaml_load.return_value = mock_config
+        mock_yaml_load.return_value = mock_config_ava
         mock_seqio_read.side_effect = ValueError
         mock_read_csv.return_value = mock_enriched_csv
         with pytest.raises(ValueError):
@@ -113,10 +113,10 @@ class TestMappingPipelineInit:
         mock_yaml_load,
         mock_open,
         mock_isdir,
-        mock_config,
+        mock_config_ava,
     ):
         mock_isdir.return_value = True
-        mock_yaml_load.return_value = mock_config
+        mock_yaml_load.return_value = mock_config_ava
         mock_seqio_read.return_value.seq = "ATGC"
         mock_read_csv.side_effect = FileNotFoundError
         with pytest.raises(FileNotFoundError):
