@@ -7,14 +7,18 @@ import pickle
 import shutil
 import subprocess
 
+import matplotlib.axes
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pysam
 import regex
+import seaborn as sns
 import yaml
 from Bio import SeqIO
 from scipy.ndimage import histogram
 from scipy.signal import find_peaks
+from scipy.stats import linregress
 
 import portek
 
@@ -150,6 +154,8 @@ class MappingPipeline:
             "-a",
             "-L",
             f"{seed_length}",
+            "--score-min",
+            "L,-0.6,-1",
             "-x",
             f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}",
             "-f",
@@ -411,17 +417,40 @@ class MappingPipeline:
             bad_mappings = bad_mappings.union(kmer_sub_df.iloc[n_peaks:].index)
         return bad_mappings
 
-    def _filter_mappings(self, mappings_df: pd.DataFrame):
+    def _filter_mappings(self, mappings_df: pd.DataFrame, verbose: bool=False)-> pd.DataFrame:
         bad_mappings = self._resolve_multiple_mappings(mappings_df)
         mappings_df.loc[bad_mappings, "mapping_ok"] = 0
         mappings_df = mappings_df[mappings_df["mapping_ok"] == 1]
+        if verbose == True:
+            print(f"\nRejected {len(bad_mappings)} dubious alignments.")
         return mappings_df
 
-    def _format_mappings_df(self, mappings_df: pd.DataFrame):
+    def _predict_unmapped(self, mappings_df: pd.DataFrame) -> pd.DataFrame:
+        mappings_with_pred_df = mappings_df.copy()
+        mappings_with_pred_df["pred_pos"] = 0
+        mappings_with_pred_df["pred_err"] = 0.0
+        mappings_with_pred_df["pred_r2"] = 0.0
+        for group in mappings_with_pred_df["group"].unique():
+            group_mappings = mappings_with_pred_df.loc[mappings_with_pred_df["group"] == group].index
+            mapped = mappings_with_pred_df.loc[(mappings_with_pred_df["ref_pos"] != 0) & (mappings_with_pred_df["group"] == group)].index
+            if len(mapped) < 30:
+                print(f"Not enough mapped k-mers for position prediction in group {group}, skipping.")
+                continue
+            real_mapped_pos = mappings_with_pred_df.loc[mapped, "real_pos"]
+            ref_mapped_pos = mappings_with_pred_df.loc[mapped, "ref_pos"]
+            regress = linregress(real_mapped_pos, ref_mapped_pos)
+            mappings_with_pred_df.loc[group_mappings, "pred_pos"] = round(regress.slope*mappings_with_pred_df.loc[group_mappings,"real_pos"]+regress.intercept).astype(int)
+            pred_mapped_err = mappings_with_pred_df.loc[mapped, "pred_pos"]-ref_mapped_pos
+            rmse = np.sqrt(sum(pred_mapped_err**2)/len(pred_mapped_err))
+            mappings_with_pred_df.loc[group_mappings, "pred_err"] = round(rmse, 2)
+            mappings_with_pred_df.loc[group_mappings, "pred_r2"] = round(regress.rvalue, 2)
+        return mappings_with_pred_df
+    
+    def _format_mappings_df(self, mappings_df: pd.DataFrame) -> pd.DataFrame:
         mappings_df.loc[mappings_df["flag"] == 4, "mutations"] = "-"
         mappings_df.loc[mappings_df["flag"] == 4, "n_mismatch"] = self.k
         formatted_df = mappings_df.drop(
-            ["flag", "CIGAR", "score", "mapping_ok", "real_pos", "n_peaks"],
+            ["flag", "CIGAR", "score", "mapping_ok", "n_peaks", "real_pos"],
             axis=1
         ).sort_values("ref_pos")
         return formatted_df
@@ -453,7 +482,7 @@ class MappingPipeline:
             ),
             axis=1,
         )
-        filtered_df = self._filter_mappings(mappings_df)
+        filtered_df = self._filter_mappings(mappings_df, verbose)
         for row in filtered_df.itertuples():
             if row.n_mismatch > 0:
                 mutations_as_tuples = self._find_variants(
@@ -465,10 +494,35 @@ class MappingPipeline:
 
         if verbose == True:
             self._count_mappings(filtered_df)
-
-        formatted_df = self._format_mappings_df(filtered_df)
+        mappings_with_pred_df = self._predict_unmapped(filtered_df)
+        formatted_df = self._format_mappings_df(mappings_with_pred_df)
         self.matrices["mappings"] = formatted_df
 
+    def _set_histogram_ax_properties(self, subplot:matplotlib.axes.Axes, max_pos:int, group:str, i:int, fig_cols:int) -> None:
+        subplot.set_title(group)
+        subplot.set_xlim(0,max_pos)
+        subplot.set_xlabel("Reference genome position")
+        if i % fig_cols == 0:
+            subplot.set_ylabel("K-mer counts")
+
+    def plot_kmer_histograms(self) -> None:
+        groups = self.matrices["mappings"]["group"].unique()
+        n_figs = len(groups)
+        fig_cols = min(n_figs,3)
+        fig_rows = int(math.ceil(n_figs/fig_cols))
+        fig, axes = plt.subplots(fig_rows, fig_cols,figsize=(fig_cols * 6, fig_rows * 6))
+        plt.subplots_adjust(hspace=0.25, wspace=0.25)
+        max_pos = len(self.ref_seq)
+        bins = 100
+        for i, group in enumerate(groups):
+            data = self.matrices["mappings"].loc[(self.matrices["mappings"]["group"] == group) & (self.matrices["mappings"]["ref_pos"] != 0), "ref_pos"]
+            if len(axes.shape) == 1:
+                subplot = axes[i]
+            else:
+                subplot = axes[i // fig_cols, i % fig_cols]
+            sns.histplot(data=data, ax=subplot, bins=bins)
+            self._set_histogram_ax_properties(subplot, max_pos, group, i, fig_cols)
+        plt.savefig(f"{self.project_dir}/output/enriched_{self.k}-mers_coverage_histograms.svg", format="svg", dpi=300, bbox_inches="tight")
 
     def save_mappings_df(self):
         print(f"\nSaving {self.k}-mer mappings.")
