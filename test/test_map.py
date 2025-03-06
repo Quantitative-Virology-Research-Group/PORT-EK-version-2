@@ -1,9 +1,12 @@
-import pytest
 import pathlib
 import pickle
-import pandas as pd
+from unittest.mock import MagicMock, mock_open, patch
+
+import matplotlib.pyplot as plt
 import numpy as np
-from unittest.mock import patch, mock_open, MagicMock
+import pandas as pd
+import pytest
+
 from portek.portek_map import MappingPipeline
 
 
@@ -306,6 +309,8 @@ class TestMappingPipeline_bowtieMap:
                 "-a",
                 "-L",
                 "3",
+                "--score-min",
+                "L,-0.6,-1",
                 "-x",
                 "/fake/dir/temp/ref_index/reference",
                 "-f",
@@ -318,9 +323,7 @@ class TestMappingPipeline_bowtieMap:
         )
 
     @patch("subprocess.run")
-    def test_bowtie_map_success(
-        self, mock_subprocess_run, mock_proper_mapping_pipeline
-    ):
+    def test_bowtie_map_error(self, mock_subprocess_run, mock_proper_mapping_pipeline):
         # Setup
         mock_subprocess_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="bowtie2 error"
@@ -339,6 +342,8 @@ class TestMappingPipeline_bowtieMap:
                 "-a",
                 "-L",
                 "3",
+                "--score-min",
+                "L,-0.6,-1",
                 "-x",
                 "/fake/dir/temp/ref_index/reference",
                 "-f",
@@ -352,7 +357,7 @@ class TestMappingPipeline_bowtieMap:
         assert context.exconly() == "Exception: bowtie2 error"
 
 
-class TestMappingPipelineRunMapping:
+class TestMappingPipeline_runMapping:
     @patch("portek.portek_map.MappingPipeline._check_bowtie2_path")
     @patch("portek.portek_map.MappingPipeline._check_index_built")
     @patch("subprocess.run")
@@ -382,6 +387,8 @@ class TestMappingPipelineRunMapping:
                 "-a",
                 "-L",
                 "3",
+                "--score-min",
+                "L,-0.6,-1",
                 "-x",
                 "/fake/dir/temp/ref_index/reference",
                 "-f",
@@ -456,6 +463,8 @@ class TestMappingPipelineRunMapping:
                 "-a",
                 "-L",
                 "3",
+                "--score-min",
+                "L,-0.6,-1",
                 "-x",
                 "/fake/dir/temp/ref_index/reference",
                 "-f",
@@ -511,9 +520,7 @@ class TestMappingPipeline_readSAMToDf:
         mock_read.flag = 0
         mock_read.reference_start = 10
         mock_read.cigarstring = "10M"
-        mock_read.get_tag.side_effect = lambda tag, _: {"NM": 1, "AS": 0}.get(
-            tag, None
-        )
+        mock_read.get_tag.side_effect = lambda tag, _: {"NM": 1, "AS": 0}.get(tag, None)
         mock_alignment_file.return_value.__iter__.return_value = [mock_read]
 
         pipeline = mock_proper_mapping_pipeline
@@ -547,9 +554,7 @@ class TestMappingPipeline_readSAMToDf:
         mock_read.flag = 0
         mock_read.reference_start = 0
         mock_read.cigarstring = "10M"
-        mock_read.get_tag.side_effect = lambda tag, _: {"NM": 1, "AS": 0}.get(
-            tag, None
-        )
+        mock_read.get_tag.side_effect = lambda tag, _: {"NM": 1, "AS": 0}.get(tag, None)
         mock_alignment_file.return_value.__iter__.return_value = [mock_read]
 
         pipeline = mock_proper_mapping_pipeline
@@ -572,6 +577,7 @@ class TestMappingPipeline_readSAMToDf:
             }
         )
         pd.testing.assert_frame_equal(df, expected_df)
+
     @patch("pysam.AlignmentFile")
     def test_read_sam_to_df_no_aln(
         self, mock_alignment_file, mock_proper_mapping_pipeline
@@ -632,7 +638,8 @@ class TestMappingPipeline_alingSeqs:
 
         assert q_seq == list("ATGCG")
         assert t_seq == list("ATGCG")
-        assert ref_pos == [0,1,2,3,4]
+        assert ref_pos == [0, 1, 2, 3, 4]
+
     def test_align_seqs_with_deletion(self, mock_proper_mapping_pipeline):
         pipeline = mock_proper_mapping_pipeline
         ref_seq = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAG"
@@ -1383,19 +1390,23 @@ class TestMappingPipeline_formatMappingsDf:
 class TestMappingPipelinePredictUnmapped:
 
     @patch("portek.portek_map.MappingPipeline._read_sam_to_df")
-    def test_predict_unmapped_success(self, mock_read_sam_to_df, mock_proper_mapping_pipeline):
+    def test_predict_unmapped_success(
+        self, mock_read_sam_to_df, mock_proper_mapping_pipeline
+    ):
         # Setup
-        mock_read_sam_to_df.return_value = pd.DataFrame({
-            "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"]*10,
-            "flag": [0, 0, 0, 4]*10,
-            "ref_pos": [10, 20, 30, 0]*10,
-            "real_pos": [11, 21, 31, 40]*10,
-            "n_mismatch": [0, 0, 0, 0]*10,
-            "score": [0, 0, 0, -30]*10,
-            "group": ["group1", "group1", "group1", "group1"]*10,
-            "mutations": ["WT", "WT", "WT", "WT"]*10,
-            "mapping_ok": [1, 1, 1, 1]*10
-        })
+        mock_read_sam_to_df.return_value = pd.DataFrame(
+            {
+                "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"] * 10,
+                "flag": [0, 0, 0, 4] * 10,
+                "ref_pos": [10, 20, 30, 0] * 10,
+                "real_pos": [11, 21, 31, 40] * 10,
+                "n_mismatch": [0, 0, 0, 0] * 10,
+                "score": [0, 0, 0, -30] * 10,
+                "group": ["group1", "group1", "group1", "group1"] * 10,
+                "mutations": ["WT", "WT", "WT", "WT"] * 10,
+                "mapping_ok": [1, 1, 1, 1] * 10,
+            }
+        )
         pipeline = mock_proper_mapping_pipeline
 
         # Execute
@@ -1408,19 +1419,23 @@ class TestMappingPipelinePredictUnmapped:
         assert "pred_r2" in result_df.columns
 
     @patch("portek.portek_map.MappingPipeline._read_sam_to_df")
-    def test_predict_unmapped_one_group_unmapped(self, mock_read_sam_to_df, mock_proper_mapping_pipeline, capsys):
+    def test_predict_unmapped_one_group_unmapped(
+        self, mock_read_sam_to_df, mock_proper_mapping_pipeline, capsys
+    ):
         # Setup
-        mock_read_sam_to_df.return_value = pd.DataFrame({
-            "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"]*10,
-            "flag": [0, 0, 0, 4]*10,
-            "ref_pos": [10, 20, 30, 0]*10,
-            "real_pos": [11, 21, 31, 40]*10,
-            "n_mismatch": [0, 0, 0, 0]*10,
-            "score": [0, 0, 0, -30]*10,
-            "group": ["group1", "group1", "group1", "group2"]*10,
-            "mutations": ["WT", "WT", "WT", "WT"]*10,
-            "mapping_ok": [1, 1, 1, 1]*10
-        })
+        mock_read_sam_to_df.return_value = pd.DataFrame(
+            {
+                "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"] * 10,
+                "flag": [0, 0, 0, 4] * 10,
+                "ref_pos": [10, 20, 30, 0] * 10,
+                "real_pos": [11, 21, 31, 40] * 10,
+                "n_mismatch": [0, 0, 0, 0] * 10,
+                "score": [0, 0, 0, -30] * 10,
+                "group": ["group1", "group1", "group1", "group2"] * 10,
+                "mutations": ["WT", "WT", "WT", "WT"] * 10,
+                "mapping_ok": [1, 1, 1, 1] * 10,
+            }
+        )
         pipeline = mock_proper_mapping_pipeline
 
         # Execute
@@ -1434,23 +1449,29 @@ class TestMappingPipelinePredictUnmapped:
         assert result_df.loc[result_df["group"] == "group2", "pred_err"].sum() == 0.0
         assert "pred_r2" in result_df.columns
         assert result_df.loc[result_df["group"] == "group2", "pred_r2"].sum() == 0.0
-        assert captured_output.out == "Not enough mapped k-mers for position prediction in group group2, skipping.\n"
-
+        assert (
+            captured_output.out
+            == "Not enough mapped k-mers for position prediction in group group2, skipping.\n"
+        )
 
     @patch("portek.portek_map.MappingPipeline._read_sam_to_df")
-    def test_predict_unmapped_no_mapped(self, mock_read_sam_to_df, mock_proper_mapping_pipeline):
+    def test_predict_unmapped_no_mapped(
+        self, mock_read_sam_to_df, mock_proper_mapping_pipeline
+    ):
         # Setup
-        mock_read_sam_to_df.return_value = pd.DataFrame({
-            "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"]*10,
-            "flag": [4, 4, 4, 4]*10,
-            "ref_pos": [0, 0, 0, 0]*10,
-            "real_pos": [0, 0, 0, 0]*10,
-            "n_mismatch": [3, 3, 3, 3]*10,
-            "score": [-30, -30, -30, -30]*10,
-            "group": ["group1", "group1", "group1", "group1"]*10,
-            "mutations": ["WT", "WT", "WT", "WT"]*10,
-            "mapping_ok": [1, 1, 1, 1]*10
-        })
+        mock_read_sam_to_df.return_value = pd.DataFrame(
+            {
+                "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"] * 10,
+                "flag": [4, 4, 4, 4] * 10,
+                "ref_pos": [0, 0, 0, 0] * 10,
+                "real_pos": [0, 0, 0, 0] * 10,
+                "n_mismatch": [3, 3, 3, 3] * 10,
+                "score": [-30, -30, -30, -30] * 10,
+                "group": ["group1", "group1", "group1", "group1"] * 10,
+                "mutations": ["WT", "WT", "WT", "WT"] * 10,
+                "mapping_ok": [1, 1, 1, 1] * 10,
+            }
+        )
         pipeline = mock_proper_mapping_pipeline
 
         # Execute
@@ -1463,6 +1484,7 @@ class TestMappingPipelinePredictUnmapped:
         assert result_df["pred_pos"].sum() == 0.0
         assert "pred_r2" in result_df.columns
         assert result_df["pred_r2"].sum() == 0.0
+
 
 class TestMappingPipeline_countMappings:
     def test_count_mappings_all_aligned(self, mock_proper_mapping_pipeline, capsys):
@@ -1730,7 +1752,16 @@ class TestMappingPipelineSaveMappingsDf:
         # Setup
         pipeline = mock_proper_mapping_pipeline
         pipeline.matrices["mappings"] = pd.DataFrame(
-            {"kmer": ["AAAAA", "TTTTT"], "ref_pos": [1, 2], "mutations": ["WT", "WT"]}
+            {
+                "kmer": ["AAAAA", "TTTTT"],
+                "ref_pos": [1, 2],
+                "n_mismatch": [0, 0],
+                "group": ["group1", "group2"],
+                "mutations": ["WT", "WT"],
+                "pred_pos": [2, 3],
+                "pred_err": [1, 1],
+                "pred_r2": [0.99, 0.99],
+            }
         )
 
         # Execute
@@ -1757,21 +1788,236 @@ class TestMappingPipelineSaveMappingsDf:
             f"{pipeline.project_dir}/output/enriched_{pipeline.k}mers_mappings.csv"
         )
 
-    @patch("pandas.DataFrame.to_csv")
-    def test_save_mappings_df_with_index(
-        self, mock_to_csv, mock_proper_mapping_pipeline
+
+class TestMappingPipeline_setHistogramAxProperties:
+
+    @patch("matplotlib.axes.Axes.set_title")
+    @patch("matplotlib.axes.Axes.set_xlim")
+    @patch("matplotlib.axes.Axes.set_xlabel")
+    @patch("matplotlib.axes.Axes.set_ylabel")
+    def test_set_ax_properites_first_in_row(
+        self,
+        mock_set_ylabel,
+        mock_set_xlabel,
+        mock_set_xlim,
+        mock_set_title,
+        mock_proper_mapping_pipeline,
     ):
         # Setup
         pipeline = mock_proper_mapping_pipeline
-        pipeline.matrices["mappings"] = pd.DataFrame(
-            {"kmer": ["AAAAA", "TTTTT"], "ref_pos": [1, 2], "mutations": ["-", "-"]}
-        )
-        pipeline.matrices["mappings"].index.name = "id"
+        _, ax = plt.subplots()
 
-        # Execute
-        pipeline.save_mappings_df()
+        # Exectue
+        pipeline._set_histogram_ax_properties(ax, 1000, "group1", 0, 3)
 
         # Verify
-        mock_to_csv.assert_called_once_with(
-            f"{pipeline.project_dir}/output/enriched_{pipeline.k}mers_mappings.csv"
+        assert mock_set_title.call_args[0][0] == "group1"
+        assert mock_set_xlim.call_args[0] == (0, 1000)
+        assert mock_set_xlabel.call_args[0][0] == "Reference genome position"
+        assert mock_set_ylabel.called
+        assert mock_set_ylabel.call_args[0][0] == "K-mer counts"
+
+    @patch("matplotlib.axes.Axes.set_title")
+    @patch("matplotlib.axes.Axes.set_xlim")
+    @patch("matplotlib.axes.Axes.set_xlabel")
+    @patch("matplotlib.axes.Axes.set_ylabel")
+    def test_set_ax_properites_not_first_in_row(
+        self,
+        mock_set_ylabel,
+        mock_set_xlabel,
+        mock_set_xlim,
+        mock_set_title,
+        mock_proper_mapping_pipeline,
+    ):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        _, ax = plt.subplots()
+
+        # Exectue
+        pipeline._set_histogram_ax_properties(ax, 1000, "group1", 1, 3)
+
+        # Verify
+        assert mock_set_title.call_args[0][0] == "group1"
+        assert mock_set_xlim.call_args[0] == (0, 1000)
+        assert mock_set_xlabel.call_args[0][0] == "Reference genome position"
+        assert not mock_set_ylabel.called
+
+    @patch("matplotlib.axes.Axes.set_title")
+    @patch("matplotlib.axes.Axes.set_xlim")
+    @patch("matplotlib.axes.Axes.set_xlabel")
+    @patch("matplotlib.axes.Axes.set_ylabel")
+    def test_set_ax_properites_only(
+        self,
+        mock_set_ylabel,
+        mock_set_xlabel,
+        mock_set_xlim,
+        mock_set_title,
+        mock_proper_mapping_pipeline,
+    ):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        _, ax = plt.subplots()
+
+        # Exectue
+        pipeline._set_histogram_ax_properties(ax, 1000, "group1", 0, 1)
+
+        # Verify
+        assert mock_set_title.call_args[0][0] == "group1"
+        assert mock_set_xlim.call_args[0] == (0, 1000)
+        assert mock_set_xlabel.call_args[0][0] == "Reference genome position"
+        assert mock_set_ylabel.called
+        assert mock_set_ylabel.call_args[0][0] == "K-mer counts"
+
+
+class TestMappingPipelinePlotKmerHistograms:
+
+    @patch("portek.portek_map.MappingPipeline._set_histogram_ax_properties")
+    @patch("matplotlib.pyplot.savefig")
+    def test_plot_kmer_histograms(
+        self, mock_savefig, mock_set_histogram_ax_properites, mock_proper_mapping_pipeline
+    ):
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.matrices["mappings"] = pd.DataFrame(
+            {
+                "kmer": ["AAAAA", "TTTTT"],
+                "ref_pos": [1, 2],
+                "n_mismatch": [0, 0],
+                "group": ["group1", "group2"],
+                "mutations": ["WT", "WT"],
+                "pred_pos": [2, 3],
+                "pred_err": [1, 1],
+                "pred_r2": [0.99, 0.99],
+            }
         )
+        # Execute
+        pipeline.plot_kmer_histograms()
+
+        # Verify
+        assert mock_savefig.called
+        assert mock_savefig.call_args[0][0] == "/fake/dir/output/enriched_5-mers_coverage_histograms.svg"
+        assert mock_savefig.call_args[1]["format"] == "svg"
+        assert mock_savefig.call_args[1]["dpi"] == 300
+        assert mock_savefig.call_args[1]["bbox_inches"] == "tight"
+
+    @patch("seaborn.histplot")
+    @patch("matplotlib.pyplot.subplots")
+    @patch("portek.portek_map.MappingPipeline._set_histogram_ax_properties")
+    @patch("matplotlib.pyplot.savefig")
+    def test_plot_kmer_histograms_1row_1col(
+        self,
+        mock_savefig,
+        mock_set_histogram_ax_properites,
+        mock_subplots,
+        mock_histplot,
+        mock_proper_mapping_pipeline,
+    ):
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.matrices["mappings"] = pd.DataFrame(
+            {
+                "kmer": ["AAAAA", "TTTTT"],
+                "ref_pos": [1, 2],
+                "n_mismatch": [0, 0],
+                "group": ["group1", "group1"],
+                "mutations": ["WT", "WT"],
+                "pred_pos": [2, 3],
+                "pred_err": [1, 1],
+                "pred_r2": [0.99, 0.99],
+            }
+        )
+        # Mock subplots to return a figure and axes
+        fig = MagicMock()
+        ax = MagicMock()
+        mock_subplots.return_value = (fig, np.array([[ax]]))
+
+        # Execute
+        pipeline.plot_kmer_histograms()
+
+        # Verify
+        assert mock_histplot.called
+        assert mock_subplots.called
+        assert mock_subplots.call_args[0][0] == 1
+        assert mock_subplots.call_args[0][1] == 1
+        assert mock_subplots.call_args[1]["figsize"] == (6, 6)
+        assert mock_savefig.called
+
+    @patch("seaborn.histplot")
+    @patch("matplotlib.pyplot.subplots")
+    @patch("portek.portek_map.MappingPipeline._set_histogram_ax_properties")
+    @patch("matplotlib.pyplot.savefig")
+    def test_plot_kmer_histograms_1row_maxcol(
+        self,
+        mock_savefig,
+        mock_set_histogram_ax_properites,
+        mock_subplots,
+        mock_histplot,
+        mock_proper_mapping_pipeline,
+    ):
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.matrices["mappings"] = pd.DataFrame(
+            {
+                "kmer": ["AAAAA", "TTTTT", "CCCCC"],
+                "ref_pos": [1, 2, 3],
+                "n_mismatch": [0, 0, 0],
+                "group": ["group1", "group2", "group3"],
+                "mutations": ["WT", "WT", "WT"],
+                "pred_pos": [2, 3, 4],
+                "pred_err": [1, 1, 1],
+                "pred_r2": [0.99, 0.99, 0.99],
+            }
+        )
+        # Mock subplots to return a figure and axes
+        fig = MagicMock()
+        ax = MagicMock()
+        mock_subplots.return_value = (fig, np.array([[ax, ax, ax]]))
+
+        # Execute
+        pipeline.plot_kmer_histograms()
+
+        # Verify
+        assert mock_histplot.called
+        assert mock_subplots.called
+        assert mock_subplots.call_args[0][0] == 1
+        assert mock_subplots.call_args[0][1] == 3
+        assert mock_subplots.call_args[1]["figsize"] == (18, 6)
+        assert mock_savefig.called
+
+    @patch("seaborn.histplot")
+    @patch("matplotlib.pyplot.subplots")
+    @patch("portek.portek_map.MappingPipeline._set_histogram_ax_properties")
+    @patch("matplotlib.pyplot.savefig")
+    def test_plot_kmer_histograms_2rows_maxcol(
+        self,
+        mock_savefig,
+        mock_set_histogram_ax_properites,
+        mock_subplots,
+        mock_histplot,
+        mock_proper_mapping_pipeline,
+    ):
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.matrices["mappings"] = pd.DataFrame(
+            {
+                "kmer": ["AAAAA", "TTTTT", "CCCCC", "GGGGG"],
+                "ref_pos": [1, 2, 3, 4],
+                "n_mismatch": [0, 0, 0, 0],
+                "group": ["group1", "group2", "group3", "group4"],
+                "mutations": ["WT", "WT", "WT", "WT"],
+                "pred_pos": [2, 3, 4, 5],
+                "pred_err": [1, 1, 1, 1],
+                "pred_r2": [0.99, 0.99, 0.99, 0.99],
+            }
+        )
+        # Mock subplots to return a figure and axes
+        fig = MagicMock()
+        ax = MagicMock()
+        mock_subplots.return_value = (fig, np.array([[ax, ax, ax], [ax, ax, ax]]))
+
+        # Execute
+        pipeline.plot_kmer_histograms()
+
+        # Verify
+        assert mock_histplot.called
+        assert mock_subplots.called
+        assert mock_subplots.call_args[0][0] == 2
+        assert mock_subplots.call_args[0][1] == 3
+        assert mock_subplots.call_args[1]["figsize"] == (18, 12)
+        assert mock_savefig.called

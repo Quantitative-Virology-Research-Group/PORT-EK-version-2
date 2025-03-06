@@ -7,17 +7,18 @@ import pickle
 import shutil
 import subprocess
 
-import numpy as np
+import matplotlib.axes
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import pysam
 import regex
 import seaborn as sns
 import yaml
 from Bio import SeqIO
-from scipy.stats import linregress
 from scipy.ndimage import histogram
 from scipy.signal import find_peaks
+from scipy.stats import linregress
 
 import portek
 
@@ -443,15 +444,6 @@ class MappingPipeline:
             rmse = np.sqrt(sum(pred_mapped_err**2)/len(pred_mapped_err))
             mappings_with_pred_df.loc[group_mappings, "pred_err"] = round(rmse, 2)
             mappings_with_pred_df.loc[group_mappings, "pred_r2"] = round(regress.rvalue, 2)
-            # perpos_err =[]
-            # for pos in range(1, mappings_df["pred_pos"].max()+1):
-            #     errs = pred_mapped_err[(mappings_df["pred_pos"] > pos-window//2) & (mappings_df["pred_pos"] < pos+window//2)]
-            #     if len(errs) == 0:
-            #         perpos_err.append(-1)
-            #     else:
-            #         perpos_err.append(np.sqrt(sum(errs**2)/len(errs)))
-            # perpos_err = np.array(perpos_err)
-            # mappings_df[f"pred_err"] = perpos_err[mappings_df["pred_pos"]-1]
         return mappings_with_pred_df
     
     def _format_mappings_df(self, mappings_df: pd.DataFrame) -> pd.DataFrame:
@@ -506,20 +498,31 @@ class MappingPipeline:
         formatted_df = self._format_mappings_df(mappings_with_pred_df)
         self.matrices["mappings"] = formatted_df
 
-    def plot_kmer_histograms(self):
+    def _set_histogram_ax_properties(self, subplot:matplotlib.axes.Axes, max_pos:int, group:str, i:int, fig_cols:int) -> None:
+        subplot.set_title(group)
+        subplot.set_xlim(0,max_pos)
+        subplot.set_xlabel("Reference genome position")
+        if i % fig_cols == 0:
+            subplot.set_ylabel("K-mer counts")
+
+    def plot_kmer_histograms(self) -> None:
         groups = self.matrices["mappings"]["group"].unique()
         n_figs = len(groups)
         fig_cols = min(n_figs,3)
-        fig_rows = (n_figs//fig_cols)+1
+        fig_rows = int(math.ceil(n_figs/fig_cols))
         fig, axes = plt.subplots(fig_rows, fig_cols,figsize=(fig_cols * 6, fig_rows * 6))
         plt.subplots_adjust(hspace=0.25, wspace=0.25)
+        max_pos = len(self.ref_seq)
+        bins = 100
         for i, group in enumerate(groups):
-            data = self.matrices["mappings"].loc[self.matrices["mappings"]["group"] == group, "ref_pos"]
+            data = self.matrices["mappings"].loc[(self.matrices["mappings"]["group"] == group) & (self.matrices["mappings"]["ref_pos"] != 0), "ref_pos"]
             if len(axes.shape) == 1:
-                sns.histplot(data=data, ax=axes[i])
+                subplot = axes[i]
             else:
-                sns.histplot(data=data, ax=axes[i // fig_cols, i % fig_cols])
-        plt.show()
+                subplot = axes[i // fig_cols, i % fig_cols]
+            sns.histplot(data=data, ax=subplot, bins=bins)
+            self._set_histogram_ax_properties(subplot, max_pos, group, i, fig_cols)
+        plt.savefig(f"{self.project_dir}/output/enriched_{self.k}-mers_coverage_histograms.svg", format="svg", dpi=300, bbox_inches="tight")
 
     def save_mappings_df(self):
         print(f"\nSaving {self.k}-mer mappings.")
