@@ -1,5 +1,6 @@
 import itertools
 import math
+import multiprocessing
 import operator
 import os
 import pathlib
@@ -231,7 +232,8 @@ class MappingPipeline:
         mappings_df["mutations"] = "WT"
         mappings_df["mapping_ok"] = 1
         mappings_df["ref_pos"] = mappings_df.apply(
-            lambda row: row["ref_pos"] + 1 if row["flag"] != 4 else row["ref_pos"], axis=1
+            lambda row: row["ref_pos"] + 1 if row["flag"] != 4 else row["ref_pos"],
+            axis=1,
         )
         mappings_df["group"] = mappings_df["kmer"].apply(
             lambda kmer: self.matrices["enriched"].loc[kmer, "group"]
@@ -295,7 +297,7 @@ class MappingPipeline:
         return grouped_muts
 
     def _find_variants(self, ref_seq, kmer, map_pos, cigar) -> list:
-        map_pos = map_pos-1
+        map_pos = map_pos - 1
         mutations = []
         q_seq, t_seq, ref_pos = self._align_seqs(ref_seq, kmer, map_pos, cigar)
         if len(q_seq) != len(t_seq) != len(ref_pos):
@@ -326,12 +328,10 @@ class MappingPipeline:
         return mutation_as_text
 
     def _load_kmer_pos(
-        self,
-        input_filename: pathlib.Path,
-        kmers: np.ndarray,
-        kmer_distros: dict,
-        verbose: bool = False,
+        self, input_filename: pathlib.Path, kmers: np.ndarray, verbose: bool = False
     ) -> None:
+        if verbose == True:
+            print(f"Loading k-mer positions from file {input_filename.stem}.")
         with open(input_filename, mode="rb") as in_file:
             group = f"{input_filename.stem.split('_')[1]}_enriched"
             temp_dict = pickle.load(in_file)
@@ -339,9 +339,29 @@ class MappingPipeline:
             portek.decode_kmer(id, self.k): positions
             for id, positions in temp_dict.items()
         }
-        kmer_distros[group] = {
-            kmer: positions for kmer, positions in temp_dict.items() if kmer in kmers
-        }
+        distro = {kmer: temp_dict[kmer] for kmer in kmers if kmer in temp_dict.keys()}
+        if verbose == True:
+            print(f"Done loading k-mer positions from file {input_filename.stem}.")
+        return group, distro
+    
+    def _get_group_distros(self, pos_results: list) -> dict:
+        kmer_distros = {}
+        if self.mode == "ava":
+            for result in pos_results:
+                kmer_distros[result[0]] = result[1]
+        else:
+            kmer_distros["control_enriched"] = {}
+            for result in pos_results:
+                if result[0] == f"{self.goi}_enriched":
+                    kmer_distros[result[0]] = result[1]
+                else:
+                    kmer_distros["control_enriched"] = {
+                        kmer: kmer_distros["control_enriched"].get(kmer, []) + result[1].get(kmer, [])
+                        for kmer in set(
+                            list(kmer_distros["control_enriched"].keys()) + list(result[1].keys())
+                        )
+                    }
+        return kmer_distros
 
     def _get_total_distros(self, kmer_distros: dict) -> None:
         total_distros = {}
@@ -364,25 +384,25 @@ class MappingPipeline:
                 distro_peaks[group][kmer] = peaks[0]
         return distro_peaks
 
-    def _get_kmer_peaks(self, mappings_df: pd.DataFrame, verbose: bool = False):
+    def _get_kmer_peaks(
+        self, mappings_df: pd.DataFrame, n_jobs: int = 4, verbose: bool = False
+    ):
         print(f"\nLoading enriched {self.k}-mer position distributions.")
-        in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
-            f"{self.k}mer_*_pos_dict.pkl"
+        in_path = list(
+            pathlib.Path(f"{self.project_dir}/input/indices/").glob(
+                f"{self.k}mer_*_pos_dict.pkl"
+            )
         )
-        if verbose == True:
-            files_counter = 1
-            tot_files = len(self.sample_groups)
-        kmer_distros = {}
+
         kmers = mappings_df["kmer"].unique()
+        pool_args = []
         for filename in in_path:
-            self._load_kmer_pos(filename, kmers, kmer_distros, verbose)
-            if verbose == True:
-                print(
-                    f"Loaded {self.k}-mer distributions from {files_counter} of {tot_files} groups.",
-                    end="\r",
-                    flush=True,
-                )
-                files_counter += 1
+            pool_args.append((filename, kmers, verbose))
+
+        with multiprocessing.get_context("forkserver").Pool(n_jobs) as pool:
+            results = pool.starmap(self._load_kmer_pos, pool_args, chunksize=1)
+
+        kmer_distros = self._get_group_distros(results)
         self._get_total_distros(kmer_distros)
         distro_peaks = self._get_peaks_from_distro(kmer_distros)
         return distro_peaks
@@ -417,7 +437,9 @@ class MappingPipeline:
             bad_mappings = bad_mappings.union(kmer_sub_df.iloc[n_peaks:].index)
         return bad_mappings
 
-    def _filter_mappings(self, mappings_df: pd.DataFrame, verbose: bool=False)-> pd.DataFrame:
+    def _filter_mappings(
+        self, mappings_df: pd.DataFrame, verbose: bool = False
+    ) -> pd.DataFrame:
         bad_mappings = self._resolve_multiple_mappings(mappings_df)
         mappings_df.loc[bad_mappings, "mapping_ok"] = 0
         mappings_df = mappings_df[mappings_df["mapping_ok"] == 1]
@@ -431,27 +453,40 @@ class MappingPipeline:
         mappings_with_pred_df["pred_err"] = 0.0
         mappings_with_pred_df["pred_r2"] = 0.0
         for group in mappings_with_pred_df["group"].unique():
-            group_mappings = mappings_with_pred_df.loc[mappings_with_pred_df["group"] == group].index
-            mapped = mappings_with_pred_df.loc[(mappings_with_pred_df["ref_pos"] != 0) & (mappings_with_pred_df["group"] == group)].index
+            group_mappings = mappings_with_pred_df.loc[
+                mappings_with_pred_df["group"] == group
+            ].index
+            mapped = mappings_with_pred_df.loc[
+                (mappings_with_pred_df["ref_pos"] != 0)
+                & (mappings_with_pred_df["group"] == group)
+            ].index
             if len(mapped) < 30:
-                print(f"Not enough mapped k-mers for position prediction in group {group}, skipping.")
+                print(
+                    f"Not enough mapped k-mers for position prediction in group {group}, skipping."
+                )
                 continue
             real_mapped_pos = mappings_with_pred_df.loc[mapped, "real_pos"]
             ref_mapped_pos = mappings_with_pred_df.loc[mapped, "ref_pos"]
             regress = linregress(real_mapped_pos, ref_mapped_pos)
-            mappings_with_pred_df.loc[group_mappings, "pred_pos"] = round(regress.slope*mappings_with_pred_df.loc[group_mappings,"real_pos"]+regress.intercept).astype(int)
-            pred_mapped_err = mappings_with_pred_df.loc[mapped, "pred_pos"]-ref_mapped_pos
-            rmse = np.sqrt(sum(pred_mapped_err**2)/len(pred_mapped_err))
+            mappings_with_pred_df.loc[group_mappings, "pred_pos"] = round(
+                regress.slope * mappings_with_pred_df.loc[group_mappings, "real_pos"]
+                + regress.intercept
+            ).astype(int)
+            pred_mapped_err = (
+                mappings_with_pred_df.loc[mapped, "pred_pos"] - ref_mapped_pos
+            )
+            rmse = np.sqrt(sum(pred_mapped_err**2) / len(pred_mapped_err))
             mappings_with_pred_df.loc[group_mappings, "pred_err"] = round(rmse, 2)
-            mappings_with_pred_df.loc[group_mappings, "pred_r2"] = round(regress.rvalue, 2)
+            mappings_with_pred_df.loc[group_mappings, "pred_r2"] = round(
+                regress.rvalue, 2
+            )
         return mappings_with_pred_df
-    
+
     def _format_mappings_df(self, mappings_df: pd.DataFrame) -> pd.DataFrame:
         mappings_df.loc[mappings_df["flag"] == 4, "mutations"] = "-"
         mappings_df.loc[mappings_df["flag"] == 4, "n_mismatch"] = self.k
         formatted_df = mappings_df.drop(
-            ["flag", "CIGAR", "score", "mapping_ok", "n_peaks", "real_pos"],
-            axis=1
+            ["flag", "CIGAR", "score", "mapping_ok", "n_peaks", "real_pos"], axis=1
         ).sort_values("ref_pos")
         return formatted_df
 
@@ -467,9 +502,9 @@ class MappingPipeline:
         print(f"Of those, {num_multiple} were aligned to more than one position.")
         print(f"{num_unaligned} {self.k}-mers couldn't be aligned.")
 
-    def analyze_mapping(self, verbose: bool = False):
+    def analyze_mapping(self, n_jobs: int = 4, verbose: bool = False):
         mappings_df = self._read_sam_to_df()
-        actual_positions = self._get_kmer_peaks(mappings_df, verbose)
+        actual_positions = self._get_kmer_peaks(mappings_df, n_jobs, verbose)
         mappings_df["real_pos"] = mappings_df.apply(
             lambda row: self._get_real_pos(
                 row["group"], row["kmer"], row["ref_pos"], actual_positions
@@ -498,9 +533,16 @@ class MappingPipeline:
         formatted_df = self._format_mappings_df(mappings_with_pred_df)
         self.matrices["mappings"] = formatted_df
 
-    def _set_histogram_ax_properties(self, subplot:matplotlib.axes.Axes, max_pos:int, group:str, i:int, fig_cols:int) -> None:
+    def _set_histogram_ax_properties(
+        self,
+        subplot: matplotlib.axes.Axes,
+        max_pos: int,
+        group: str,
+        i: int,
+        fig_cols: int,
+    ) -> None:
         subplot.set_title(group)
-        subplot.set_xlim(0,max_pos)
+        subplot.set_xlim(0, max_pos)
         subplot.set_xlabel("Reference genome position")
         if i % fig_cols == 0:
             subplot.set_ylabel("K-mer counts")
@@ -508,21 +550,32 @@ class MappingPipeline:
     def plot_kmer_histograms(self) -> None:
         groups = self.matrices["mappings"]["group"].unique()
         n_figs = len(groups)
-        fig_cols = min(n_figs,3)
-        fig_rows = int(math.ceil(n_figs/fig_cols))
-        fig, axes = plt.subplots(fig_rows, fig_cols,figsize=(fig_cols * 6, fig_rows * 6))
+        fig_cols = min(n_figs, 3)
+        fig_rows = int(math.ceil(n_figs / fig_cols))
+        fig, axes = plt.subplots(
+            fig_rows, fig_cols, figsize=(fig_cols * 6, fig_rows * 6)
+        )
         plt.subplots_adjust(hspace=0.25, wspace=0.25)
         max_pos = len(self.ref_seq)
         bins = 100
         for i, group in enumerate(groups):
-            data = self.matrices["mappings"].loc[(self.matrices["mappings"]["group"] == group) & (self.matrices["mappings"]["ref_pos"] != 0), "ref_pos"]
+            data = self.matrices["mappings"].loc[
+                (self.matrices["mappings"]["group"] == group)
+                & (self.matrices["mappings"]["ref_pos"] != 0),
+                "ref_pos",
+            ]
             if len(axes.shape) == 1:
                 subplot = axes[i]
             else:
                 subplot = axes[i // fig_cols, i % fig_cols]
             sns.histplot(data=data, ax=subplot, bins=bins)
             self._set_histogram_ax_properties(subplot, max_pos, group, i, fig_cols)
-        plt.savefig(f"{self.project_dir}/output/enriched_{self.k}-mers_coverage_histograms.svg", format="svg", dpi=300, bbox_inches="tight")
+        plt.savefig(
+            f"{self.project_dir}/output/enriched_{self.k}-mers_coverage_histograms.svg",
+            format="svg",
+            dpi=300,
+            bbox_inches="tight",
+        )
 
     def save_mappings_df(self):
         print(f"\nSaving {self.k}-mer mappings.")

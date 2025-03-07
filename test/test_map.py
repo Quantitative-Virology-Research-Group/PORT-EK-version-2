@@ -23,11 +23,11 @@ class TestMappingPipelineInit:
         mock_yaml_load,
         mock_open,
         mock_isdir,
-        mock_config,
+        mock_config_ava,
         mock_enriched_csv,
     ):
         mock_isdir.return_value = True
-        mock_yaml_load.return_value = mock_config
+        mock_yaml_load.return_value = mock_config_ava
         mock_read_csv.return_value = mock_enriched_csv
         mock_seqio_read.return_value.seq = "ATGC"
 
@@ -36,9 +36,9 @@ class TestMappingPipelineInit:
         assert pipeline.project_dir == "/fake/dir"
         assert pipeline.k == 5
         assert pipeline.sample_groups == ["group1", "group2"]
-        assert pipeline.mode == "ovr"
-        assert pipeline.goi == "group1"
-        assert pipeline.control_groups == ["group2"]
+        assert pipeline.mode == "ava"
+        assert pipeline.goi == None
+        assert pipeline.control_groups == None
         assert pipeline.ref_seq_name == "reference"
         assert pipeline.ref_seq == "ATGC"
         assert pipeline.ref_genes == ["gene1", "gene2"]
@@ -71,11 +71,11 @@ class TestMappingPipelineInit:
     @patch("builtins.open", new_callable=mock_open)
     @patch("yaml.safe_load")
     def test_init_invalid_mode(
-        self, mock_yaml_load, mock_open, mock_isdir, mock_config
+        self, mock_yaml_load, mock_open, mock_isdir, mock_config_ava
     ):
         mock_isdir.return_value = True
-        mock_config["mode"] = "invalid_mode"
-        mock_yaml_load.return_value = mock_config
+        mock_config_ava["mode"] = "invalid_mode"
+        mock_yaml_load.return_value = mock_config_ava
         with pytest.raises(ValueError):
             MappingPipeline("/fake/dir", 5)
 
@@ -91,11 +91,11 @@ class TestMappingPipelineInit:
         mock_yaml_load,
         mock_open,
         mock_isdir,
-        mock_config,
+        mock_config_ava,
         mock_enriched_csv,
     ):
         mock_isdir.return_value = True
-        mock_yaml_load.return_value = mock_config
+        mock_yaml_load.return_value = mock_config_ava
         mock_seqio_read.side_effect = ValueError
         mock_read_csv.return_value = mock_enriched_csv
         with pytest.raises(ValueError):
@@ -113,10 +113,10 @@ class TestMappingPipelineInit:
         mock_yaml_load,
         mock_open,
         mock_isdir,
-        mock_config,
+        mock_config_ava,
     ):
         mock_isdir.return_value = True
-        mock_yaml_load.return_value = mock_config
+        mock_yaml_load.return_value = mock_config_ava
         mock_seqio_read.return_value.seq = "ATGC"
         mock_read_csv.side_effect = FileNotFoundError
         with pytest.raises(FileNotFoundError):
@@ -819,21 +819,18 @@ class TestMappingPipeline_loadKmerPos:
         # Setup
         mock_pickle_load.return_value = {0: [1, 2, 3], 1: [4, 5, 6]}
         pipeline = mock_proper_mapping_pipeline
-        kmer_distros = {}
+
         # Execute
-        pipeline._load_kmer_pos(
+        result = pipeline._load_kmer_pos(
             pathlib.Path("/fake/dir/input/indices/5mers_group1_pos_dict.pkl"),
             ["AAAAA", "AAAAC"],
-            kmer_distros,
         )
 
         # Verify
         mock_open.assert_called_once_with(
             pathlib.Path("/fake/dir/input/indices/5mers_group1_pos_dict.pkl"), mode="rb"
         )
-        assert kmer_distros == {
-            "group1_enriched": {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]}
-        }
+        assert result == ("group1_enriched", {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]})
 
     @patch("builtins.open", new_callable=mock_open)
     def test_load_kmer_pos_file_not_found(
@@ -842,14 +839,12 @@ class TestMappingPipeline_loadKmerPos:
         # Setup
         mock_open.side_effect = FileNotFoundError
         pipeline = mock_proper_mapping_pipeline
-        kmer_distros = {}
 
         # Execute & Verify
         with pytest.raises(FileNotFoundError):
-            pipeline._load_kmer_pos(
+            result = pipeline._load_kmer_pos(
                 pathlib.Path("/fake/dir/input/indices/5mers_group1_pos_dict.pkl"),
                 ["AAAAA", "AAAAC"],
-                kmer_distros,
             )
 
     @patch("builtins.open", new_callable=mock_open)
@@ -860,20 +855,18 @@ class TestMappingPipeline_loadKmerPos:
         # Setup
         mock_pickle_load.return_value = {}
         pipeline = mock_proper_mapping_pipeline
-        kmer_distros = {}
 
         # Execute
-        pipeline._load_kmer_pos(
+        result = pipeline._load_kmer_pos(
             pathlib.Path("/fake/dir/input/indices/5mers_group1_pos_dict.pkl"),
             ["AAAAA", "AAAAC"],
-            kmer_distros,
         )
 
         # Verify
         mock_open.assert_called_once_with(
             pathlib.Path("/fake/dir/input/indices/5mers_group1_pos_dict.pkl"), mode="rb"
         )
-        assert kmer_distros == {"group1_enriched": {}}
+        assert result == ("group1_enriched", {})
 
     @patch("builtins.open", new_callable=mock_open)
     @patch("pickle.load")
@@ -883,15 +876,92 @@ class TestMappingPipeline_loadKmerPos:
         # Setup
         mock_pickle_load.side_effect = pickle.UnpicklingError
         pipeline = mock_proper_mapping_pipeline
-        kmer_distros = {}
 
         # Execute & Verify
         with pytest.raises(pickle.UnpicklingError):
-            pipeline._load_kmer_pos(
+            result = pipeline._load_kmer_pos(
                 pathlib.Path("/fake/dir/input/indices/5mers_group1_pos_dict.pkl"),
                 ["AAAAA", "AAAAC"],
-                kmer_distros,
             )
+
+
+class TestMappingPipelineGetGroupDistros:
+    @patch("portek.portek_map.MappingPipeline._load_kmer_pos")
+    def test_get_group_distros_ava_mode(self, mock_load_kmer_pos, mock_proper_mapping_pipeline):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.mode = "ava"
+        pos_results = [
+            ("group1_enriched", {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]}),
+            ("group2_enriched", {"AAAAG": [7, 8, 9], "AAAAT": [10, 11, 12]})
+        ]
+
+        # Execute
+        kmer_distros = pipeline._get_group_distros(pos_results)
+
+        # Verify
+        expected_distros = {
+            "group1_enriched": {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]},
+            "group2_enriched": {"AAAAG": [7, 8, 9], "AAAAT": [10, 11, 12]}
+        }
+        assert kmer_distros == expected_distros
+
+    @patch("portek.portek_map.MappingPipeline._load_kmer_pos")
+    def test_get_group_distros_ovr_mode(self, mock_load_kmer_pos, mock_proper_mapping_pipeline):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.mode = "ovr"
+        pipeline.goi = "group1"
+        pos_results = [
+            ("group1_enriched", {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]}),
+            ("group2_enriched", {"AAAAG": [7, 8, 9], "AAAAT": [10, 11, 12]})
+        ]
+
+        # Execute
+        kmer_distros = pipeline._get_group_distros(pos_results)
+
+        # Verify
+        expected_distros = {
+            "group1_enriched": {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]},
+            "control_enriched": {"AAAAG": [7, 8, 9], "AAAAT": [10, 11, 12]}
+        }
+        assert kmer_distros == expected_distros
+
+    @patch("portek.portek_map.MappingPipeline._load_kmer_pos")
+    def test_get_group_distros_ovr_mode_with_overlap(self, mock_load_kmer_pos, mock_proper_mapping_pipeline):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.mode = "ovr"
+        pipeline.goi = "group1"
+        pos_results = [
+            ("group1_enriched", {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]}),
+            ("group2_enriched", {"AAAAA": [7, 8, 9], "AAAAT": [10, 11, 12]}),
+            ("group3_enriched", {"AAAAA": [7, 8, 9], "GGGGT": [10, 11, 12]})
+        ]
+
+        # Execute
+        kmer_distros = pipeline._get_group_distros(pos_results)
+
+        # Verify
+        expected_distros = {
+            "group1_enriched": {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]},
+            "control_enriched": {"AAAAA": [7, 8, 9,7,8,9], "AAAAT": [10, 11, 12],"GGGGT": [10, 11, 12]}
+        }
+        assert kmer_distros == expected_distros
+
+    @patch("portek.portek_map.MappingPipeline._load_kmer_pos")
+    def test_get_group_distros_empty_results(self, mock_load_kmer_pos, mock_proper_mapping_pipeline):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.mode = "ava"
+        pos_results = []
+
+        # Execute
+        kmer_distros = pipeline._get_group_distros(pos_results)
+
+        # Verify
+        expected_distros = {}
+        assert kmer_distros == expected_distros
 
 
 class TestMappingPipeline_getTotalDistros:
@@ -1114,8 +1184,8 @@ class TestMappingPipeline_getPeaksFromDistro:
 
 
 class TestMappingPipeline_getKmerPeaks:
-
-    def test_get_kmer_peaks(self, mock_proper_mapping_pipeline):
+    @patch("multiprocessing.pool.Pool.starmap")
+    def test_get_kmer_peaks(self, mock_starmap, mock_proper_mapping_pipeline):
         # Setup
         data = {
             "kmer": ["AAAAA", "TTTTT", "CCCCC"],
@@ -1129,8 +1199,8 @@ class TestMappingPipeline_getKmerPeaks:
         for i, mock_file in enumerate(mock_files):
             mock_file.stem = f"{i}_pos_dict"
         with patch.object(pathlib.Path, "glob", return_value=mock_files), patch.object(
-            MappingPipeline, "_load_kmer_pos"
-        ) as mock_load_kmer_pos, patch.object(
+            MappingPipeline, "_get_group_distros"
+        ) as mock_get_group_distros, patch.object(
             MappingPipeline, "_get_total_distros"
         ) as mock_get_total_distros, patch.object(
             MappingPipeline,
@@ -1144,7 +1214,9 @@ class TestMappingPipeline_getKmerPeaks:
             distro_peaks = mapping_pipeline._get_kmer_peaks(mappings_df, verbose=True)
 
             # Assertions
-            mock_load_kmer_pos.assert_called()
+            mock_starmap.assert_called_once()
+            assert mock_starmap.call_args[0][0] == mapping_pipeline._load_kmer_pos
+            mock_get_group_distros.assert_called_once()
             mock_get_total_distros.assert_called_once()
             mock_get_peaks_from_distro.assert_called_once()
             assert distro_peaks == {
@@ -1874,7 +1946,10 @@ class TestMappingPipelinePlotKmerHistograms:
     @patch("portek.portek_map.MappingPipeline._set_histogram_ax_properties")
     @patch("matplotlib.pyplot.savefig")
     def test_plot_kmer_histograms(
-        self, mock_savefig, mock_set_histogram_ax_properites, mock_proper_mapping_pipeline
+        self,
+        mock_savefig,
+        mock_set_histogram_ax_properites,
+        mock_proper_mapping_pipeline,
     ):
         pipeline = mock_proper_mapping_pipeline
         pipeline.matrices["mappings"] = pd.DataFrame(
@@ -1894,7 +1969,10 @@ class TestMappingPipelinePlotKmerHistograms:
 
         # Verify
         assert mock_savefig.called
-        assert mock_savefig.call_args[0][0] == "/fake/dir/output/enriched_5-mers_coverage_histograms.svg"
+        assert (
+            mock_savefig.call_args[0][0]
+            == "/fake/dir/output/enriched_5-mers_coverage_histograms.svg"
+        )
         assert mock_savefig.call_args[1]["format"] == "svg"
         assert mock_savefig.call_args[1]["dpi"] == 300
         assert mock_savefig.call_args[1]["bbox_inches"] == "tight"

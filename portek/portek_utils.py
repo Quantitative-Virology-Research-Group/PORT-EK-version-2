@@ -31,11 +31,8 @@ def filter_kmers(kmer_df: pd.DataFrame, freq_cols: list, cons_thr=0.01) -> pd.Da
     out_kmer_df = kmer_df[(kmer_df[freq_cols] > cons_thr).any(axis=1)]
     return out_kmer_df
 
-
-def calc_kmer_pvalue(kmer: str, first_group, sec_group, matrix: pd.DataFrame, freq_cols, err_cols):
-    # if all(matrix.loc[kmer, freq_cols] > 0.9) and all(abs(matrix.loc[kmer, err_cols]) < 0.1):
-    #     return 1
-    # else:
+#deprecated
+def calc_kmer_pvalue(kmer: str, first_group, sec_group, matrix: pd.DataFrame):
     first_obs = matrix.loc[kmer, first_group]
     sec_obs = matrix.loc[kmer, sec_group]
     test_result = stats.mannwhitneyu(first_obs, sec_obs)
