@@ -328,10 +328,7 @@ class MappingPipeline:
         return mutation_as_text
 
     def _load_kmer_pos(
-        self,
-        input_filename: pathlib.Path,
-        kmers: np.ndarray,
-        verbose: bool = False
+        self, input_filename: pathlib.Path, kmers: np.ndarray, verbose: bool = False
     ) -> None:
         if verbose == True:
             print(f"Loading k-mer positions from file {input_filename.stem}.")
@@ -342,12 +339,29 @@ class MappingPipeline:
             portek.decode_kmer(id, self.k): positions
             for id, positions in temp_dict.items()
         }
-        distro = {
-            kmer: temp_dict[kmer] for kmer in kmers if kmer in temp_dict.keys()
-        }
+        distro = {kmer: temp_dict[kmer] for kmer in kmers if kmer in temp_dict.keys()}
         if verbose == True:
             print(f"Done loading k-mer positions from file {input_filename.stem}.")
         return group, distro
+    
+    def _get_group_distros(self, pos_results: list) -> dict:
+        kmer_distros = {}
+        if self.mode == "ava":
+            for result in pos_results:
+                kmer_distros[result[0]] = result[1]
+        else:
+            kmer_distros["control_enriched"] = {}
+            for result in pos_results:
+                if result[0] == f"{self.goi}_enriched":
+                    kmer_distros[result[0]] = result[1]
+                else:
+                    kmer_distros["control_enriched"] = {
+                        kmer: kmer_distros["control_enriched"].get(kmer, []) + result[1].get(kmer, [])
+                        for kmer in set(
+                            list(kmer_distros["control_enriched"].keys()) + list(result[1].keys())
+                        )
+                    }
+        return kmer_distros
 
     def _get_total_distros(self, kmer_distros: dict) -> None:
         total_distros = {}
@@ -370,25 +384,25 @@ class MappingPipeline:
                 distro_peaks[group][kmer] = peaks[0]
         return distro_peaks
 
-    def _get_kmer_peaks(self, mappings_df: pd.DataFrame, n_jobs:int = 4,verbose: bool = False):
+    def _get_kmer_peaks(
+        self, mappings_df: pd.DataFrame, n_jobs: int = 4, verbose: bool = False
+    ):
         print(f"\nLoading enriched {self.k}-mer position distributions.")
-        in_path = list(pathlib.Path(f"{self.project_dir}/input/indices/").glob(
-            f"{self.k}mer_*_pos_dict.pkl"
-        ))
-        kmer_distros = {}
+        in_path = list(
+            pathlib.Path(f"{self.project_dir}/input/indices/").glob(
+                f"{self.k}mer_*_pos_dict.pkl"
+            )
+        )
+
         kmers = mappings_df["kmer"].unique()
         pool_args = []
         for filename in in_path:
             pool_args.append((filename, kmers, verbose))
 
         with multiprocessing.get_context("forkserver").Pool(n_jobs) as pool:
-                results = pool.starmap(
-                    self._load_kmer_pos, pool_args, chunksize=1
-                )
+            results = pool.starmap(self._load_kmer_pos, pool_args, chunksize=1)
 
-        for result in results:
-            kmer_distros[result[0]] = result[1]
-        
+        kmer_distros = self._get_group_distros(results)
         self._get_total_distros(kmer_distros)
         distro_peaks = self._get_peaks_from_distro(kmer_distros)
         return distro_peaks
@@ -488,9 +502,9 @@ class MappingPipeline:
         print(f"Of those, {num_multiple} were aligned to more than one position.")
         print(f"{num_unaligned} {self.k}-mers couldn't be aligned.")
 
-    def analyze_mapping(self, n_jobs:int=4,verbose: bool = False):
+    def analyze_mapping(self, n_jobs: int = 4, verbose: bool = False):
         mappings_df = self._read_sam_to_df()
-        actual_positions = self._get_kmer_peaks(mappings_df, n_jobs,verbose)
+        actual_positions = self._get_kmer_peaks(mappings_df, n_jobs, verbose)
         mappings_df["real_pos"] = mappings_df.apply(
             lambda row: self._get_real_pos(
                 row["group"], row["kmer"], row["ref_pos"], actual_positions

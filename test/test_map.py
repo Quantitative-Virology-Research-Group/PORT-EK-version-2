@@ -823,7 +823,7 @@ class TestMappingPipeline_loadKmerPos:
         # Execute
         result = pipeline._load_kmer_pos(
             pathlib.Path("/fake/dir/input/indices/5mers_group1_pos_dict.pkl"),
-            ["AAAAA", "AAAAC"]
+            ["AAAAA", "AAAAC"],
         )
 
         # Verify
@@ -844,7 +844,7 @@ class TestMappingPipeline_loadKmerPos:
         with pytest.raises(FileNotFoundError):
             result = pipeline._load_kmer_pos(
                 pathlib.Path("/fake/dir/input/indices/5mers_group1_pos_dict.pkl"),
-                ["AAAAA", "AAAAC"]
+                ["AAAAA", "AAAAC"],
             )
 
     @patch("builtins.open", new_callable=mock_open)
@@ -859,7 +859,7 @@ class TestMappingPipeline_loadKmerPos:
         # Execute
         result = pipeline._load_kmer_pos(
             pathlib.Path("/fake/dir/input/indices/5mers_group1_pos_dict.pkl"),
-            ["AAAAA", "AAAAC"]
+            ["AAAAA", "AAAAC"],
         )
 
         # Verify
@@ -881,8 +881,87 @@ class TestMappingPipeline_loadKmerPos:
         with pytest.raises(pickle.UnpicklingError):
             result = pipeline._load_kmer_pos(
                 pathlib.Path("/fake/dir/input/indices/5mers_group1_pos_dict.pkl"),
-                ["AAAAA", "AAAAC"]
+                ["AAAAA", "AAAAC"],
             )
+
+
+class TestMappingPipelineGetGroupDistros:
+    @patch("portek.portek_map.MappingPipeline._load_kmer_pos")
+    def test_get_group_distros_ava_mode(self, mock_load_kmer_pos, mock_proper_mapping_pipeline):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.mode = "ava"
+        pos_results = [
+            ("group1_enriched", {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]}),
+            ("group2_enriched", {"AAAAG": [7, 8, 9], "AAAAT": [10, 11, 12]})
+        ]
+
+        # Execute
+        kmer_distros = pipeline._get_group_distros(pos_results)
+
+        # Verify
+        expected_distros = {
+            "group1_enriched": {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]},
+            "group2_enriched": {"AAAAG": [7, 8, 9], "AAAAT": [10, 11, 12]}
+        }
+        assert kmer_distros == expected_distros
+
+    @patch("portek.portek_map.MappingPipeline._load_kmer_pos")
+    def test_get_group_distros_ovr_mode(self, mock_load_kmer_pos, mock_proper_mapping_pipeline):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.mode = "ovr"
+        pipeline.goi = "group1"
+        pos_results = [
+            ("group1_enriched", {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]}),
+            ("group2_enriched", {"AAAAG": [7, 8, 9], "AAAAT": [10, 11, 12]})
+        ]
+
+        # Execute
+        kmer_distros = pipeline._get_group_distros(pos_results)
+
+        # Verify
+        expected_distros = {
+            "group1_enriched": {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]},
+            "control_enriched": {"AAAAG": [7, 8, 9], "AAAAT": [10, 11, 12]}
+        }
+        assert kmer_distros == expected_distros
+
+    @patch("portek.portek_map.MappingPipeline._load_kmer_pos")
+    def test_get_group_distros_ovr_mode_with_overlap(self, mock_load_kmer_pos, mock_proper_mapping_pipeline):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.mode = "ovr"
+        pipeline.goi = "group1"
+        pos_results = [
+            ("group1_enriched", {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]}),
+            ("group2_enriched", {"AAAAA": [7, 8, 9], "AAAAT": [10, 11, 12]}),
+            ("group3_enriched", {"AAAAA": [7, 8, 9], "GGGGT": [10, 11, 12]})
+        ]
+
+        # Execute
+        kmer_distros = pipeline._get_group_distros(pos_results)
+
+        # Verify
+        expected_distros = {
+            "group1_enriched": {"AAAAA": [1, 2, 3], "AAAAC": [4, 5, 6]},
+            "control_enriched": {"AAAAA": [7, 8, 9,7,8,9], "AAAAT": [10, 11, 12],"GGGGT": [10, 11, 12]}
+        }
+        assert kmer_distros == expected_distros
+
+    @patch("portek.portek_map.MappingPipeline._load_kmer_pos")
+    def test_get_group_distros_empty_results(self, mock_load_kmer_pos, mock_proper_mapping_pipeline):
+        # Setup
+        pipeline = mock_proper_mapping_pipeline
+        pipeline.mode = "ava"
+        pos_results = []
+
+        # Execute
+        kmer_distros = pipeline._get_group_distros(pos_results)
+
+        # Verify
+        expected_distros = {}
+        assert kmer_distros == expected_distros
 
 
 class TestMappingPipeline_getTotalDistros:
@@ -1106,7 +1185,7 @@ class TestMappingPipeline_getPeaksFromDistro:
 
 class TestMappingPipeline_getKmerPeaks:
     @patch("multiprocessing.pool.Pool.starmap")
-    def test_get_kmer_peaks(self, mock_starmap,mock_proper_mapping_pipeline):
+    def test_get_kmer_peaks(self, mock_starmap, mock_proper_mapping_pipeline):
         # Setup
         data = {
             "kmer": ["AAAAA", "TTTTT", "CCCCC"],
@@ -1120,6 +1199,8 @@ class TestMappingPipeline_getKmerPeaks:
         for i, mock_file in enumerate(mock_files):
             mock_file.stem = f"{i}_pos_dict"
         with patch.object(pathlib.Path, "glob", return_value=mock_files), patch.object(
+            MappingPipeline, "_get_group_distros"
+        ) as mock_get_group_distros, patch.object(
             MappingPipeline, "_get_total_distros"
         ) as mock_get_total_distros, patch.object(
             MappingPipeline,
@@ -1135,6 +1216,7 @@ class TestMappingPipeline_getKmerPeaks:
             # Assertions
             mock_starmap.assert_called_once()
             assert mock_starmap.call_args[0][0] == mapping_pipeline._load_kmer_pos
+            mock_get_group_distros.assert_called_once()
             mock_get_total_distros.assert_called_once()
             mock_get_peaks_from_distro.assert_called_once()
             assert distro_peaks == {
