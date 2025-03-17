@@ -15,6 +15,30 @@ class KmerFinder(BasePipeline):
     """
     KmerFinder:
     """
+    def _read_seq(self, group, file, header_format):
+        in_path = f"{self.project_dir}/input/{file}"
+        seq_list = list(SeqIO.parse(in_path, format="fasta"))
+        for seq in seq_list:
+            if header_format == "gisaid":
+                if len(seq.id.split("|")) > 1:
+                    seq.id = seq.id.split("|")[1]
+            elif header_format == "ncbi":
+                seq.id = seq.id.split("|")[0][:-1]
+            if "/" in seq.id:
+                raise ValueError(
+                    "Sequence ids cannot contain '/'. Specify correct header formats in the config file."
+                )
+            seq.seq = seq.seq.upper()
+
+        sample_list = [seq.id for seq in seq_list]
+        self.seq_lists.append(seq_list)
+        samplelist_path = f"{self.project_dir}/input/indices/"
+        if os.path.exists(samplelist_path) == False:
+            os.makedirs(samplelist_path)
+        with open(
+            f"{samplelist_path}/{group}_sample_list.pkl", mode="wb"
+        ) as out_file:
+            pickle.dump(sample_list, out_file, protocol=pickle.HIGHEST_PROTOCOL)
 
     def __init__(self, project_dir: str, mink: int, maxk: int) -> None:
 
@@ -37,30 +61,7 @@ class KmerFinder(BasePipeline):
         
         self.seq_lists = []
         for i, group in enumerate(self.sample_groups):
-            in_path = f"{self.project_dir}/input/{self.input_files[i]}"
-            header_format = self.header_format[i]
-            seq_list = list(SeqIO.parse(in_path, format="fasta"))
-            for seq in seq_list:
-                if header_format == "gisaid":
-                    if len(seq.id.split("|")) > 1:
-                        seq.id = seq.id.split("|")[1]
-                elif header_format == "ncbi":
-                    seq.id = seq.id.split("|")[0][:-1]
-                if "/" in seq.id:
-                    raise ValueError(
-                        "Sequence ids cannot contain '/'. Specify correct header formats in the config file."
-                    )
-                seq.seq = seq.seq.upper()
-
-            sample_list = [seq.id for seq in seq_list]
-            self.seq_lists.append(seq_list)
-            samplelist_path = f"{self.project_dir}/input/indices/"
-            if os.path.exists(samplelist_path) == False:
-                os.makedirs(samplelist_path)
-            with open(
-                f"{samplelist_path}/{group}_sample_list.pkl", mode="wb"
-            ) as out_file:
-                pickle.dump(sample_list, out_file, protocol=pickle.HIGHEST_PROTOCOL)
+            self._read_seq(group, self.input_files[i], self.header_format[i])
 
     def _unknown_nuc(self):
         return "X"
@@ -191,7 +192,7 @@ class FindOptimalKPipeline(BasePipeline):
         if self.maxk < self.mink:
             raise ValueError("Minimum k must be no greater than maximum k!")
         super().__init__(project_dir)
-        
+
         self.times = times
         self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
         self.freq_cols = [f"{group}_freq" for group in self.sample_groups]
