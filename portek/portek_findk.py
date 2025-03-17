@@ -5,26 +5,18 @@ import pickle
 import multiprocessing
 import numpy as np
 import pandas as pd
-
-# import matplotlib.pyplot as plt
-# import seaborn as sns
 from collections import defaultdict
-
-# from sklearn.preprocessing import MinMaxScaler
 from time import process_time
 from Bio import SeqIO
 
+from portek.portek_utils import BasePipeline
 
-class KmerFinder:
+class KmerFinder(BasePipeline):
     """
     KmerFinder:
     """
 
     def __init__(self, project_dir: str, mink: int, maxk: int) -> None:
-        if os.path.isdir(project_dir) == True:
-            self.project_dir = project_dir
-        else:
-            raise NotADirectoryError("Project directory does not exist!")
 
         if type(mink) != int or mink < 5 or mink % 2 == 0:
             raise TypeError(
@@ -32,7 +24,6 @@ class KmerFinder:
             )
         else:
             self.mink = mink
-
         if type(maxk) != int or maxk < 5 or maxk % 2 == 0:
             raise TypeError(
                 "Maximum k must by an odd integer not smaller than 5!"
@@ -40,41 +31,21 @@ class KmerFinder:
         else:
             self.maxk = maxk
 
-        try:
-            with open(f"{project_dir}/config.yaml", "r") as config_file:
-                config = yaml.safe_load(config_file)
-            self.sample_groups = config["sample_groups"]
-            if len(config["header_format"]) != 0:
-                self.input_fastas = zip(
-                    config["input_files"],
-                    config["header_format"],
-                    config["sample_groups"],
-                )
-            else:
-                self.input_fastas = zip(
-                    config["input_files"],
-                    ["plain"] * len(config["input_files"]),
-                    config["sample_groups"],
-                )
-
-        except:
-            raise FileNotFoundError(
-                f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
-
+        if self.maxk < self.mink:
+            raise ValueError("Minimum k must be no greater than maximum k!")
+        super().__init__(project_dir)
+        
         self.seq_lists = []
-
-        for in_file, header_format, group in self.input_fastas:
-            in_path = f"{self.project_dir}/input/{in_file}"
+        for i, group in enumerate(self.sample_groups):
+            in_path = f"{self.project_dir}/input/{self.input_files[i]}"
+            header_format = self.header_format[i]
             seq_list = list(SeqIO.parse(in_path, format="fasta"))
             for seq in seq_list:
-
                 if header_format == "gisaid":
                     if len(seq.id.split("|")) > 1:
                         seq.id = seq.id.split("|")[1]
                 elif header_format == "ncbi":
                     seq.id = seq.id.split("|")[0][:-1]
-
                 if "/" in seq.id:
                     raise ValueError(
                         "Sequence ids cannot contain '/'. Specify correct header formats in the config file."

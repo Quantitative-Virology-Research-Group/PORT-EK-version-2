@@ -4,24 +4,88 @@ import yaml
 import numpy as np
 import pandas as pd
 from unittest.mock import patch, mock_open, MagicMock
+from portek.portek_utils import BasePipeline
 from portek.portek_map import MappingPipeline
 from portek.portek_enriched import EnrichedKmersPipeline
 
 @pytest.fixture
-def setup_project_dir(tmp_path):
-    project_dir = tmp_path / "test_project"
-    os.makedirs(project_dir / "input")
-    config = {
+def valid_config():
+    return {
         "sample_groups": ["group1", "group2"],
+        "input_files": ["group1.fasta", "group2.fasta"],
+        "header_format": ["gisaid", "ncbi"],
         "mode": "ovr",
         "goi": "group1",
-        "ref_seq": "test_ref.fasta"
+        "ref_seq": "ref_seq.fasta"
     }
-    with open(project_dir / "config.yaml", "w") as f:
-        yaml.dump(config, f)
-    with open(project_dir / "input/test_ref.fasta", "w") as f:
-        f.write(">test_ref\nATGC")
-    return project_dir
+
+@pytest.fixture
+def valid_config_no_header():
+    return {
+        "sample_groups": ["group1", "group2"],
+        "input_files": ["group1.fasta", "group2.fasta"],
+        "header_format": [],
+        "mode": "ovr",
+        "goi": "group1",
+        "ref_seq": "ref_seq.fasta"
+    }
+
+@pytest.fixture
+def invalid_config_lenghts():
+    return {
+        "sample_groups": ["group1"],
+        "input_files": ["group1.fasta", "group2.fasta"],
+        "header_format": ["format1"],
+        "mode": "invalid_mode",
+        "goi": "group1",
+        "ref_seq": "ref_seq.fasta"
+    }
+
+@pytest.fixture
+def invalid_config_headers_lengths():
+    return {
+        "sample_groups": ["group1", "group2"],
+        "input_files": ["group1.fasta", "group2.fasta"],
+        "header_format": ["format1"],
+        "mode": "invalid_mode",
+        "goi": "group1",
+        "ref_seq": "ref_seq.fasta"
+    }
+@pytest.fixture
+def invalid_config_headers():
+    return {
+        "sample_groups": ["group1", "group2"],
+        "input_files": ["group1.fasta", "group2.fasta"],
+        "header_format": ["unknown", "something"],
+        "mode": "ovr",
+        "goi": "group1",
+        "ref_seq": "ref_seq.fasta"
+    }
+
+@pytest.fixture
+def invalid_config_mode():
+    return {
+        "sample_groups": ["group1", "group2"],
+        "input_files": ["group1.fasta", "group2.fasta"],
+        "header_format": ["unknown", "something"],
+        "mode": "invalid_mode",
+        "goi": "group1",
+        "ref_seq": "ref_seq.fasta"
+    }
+
+@pytest.fixture
+def test_project_dir(tmp_path):
+    return tmp_path
+
+@pytest.fixture
+@patch("builtins.open", new_callable=mock_open)
+@patch("yaml.safe_load")
+@patch("Bio.SeqIO.read")
+def test_base_pipeline(mock_read, mock_load, mock_open, test_project_dir, valid_config):
+    mock_load.return_value = valid_config
+    mock_read.return_value.seq = "ATGCATGC"
+
+    return BasePipeline(str(test_project_dir))
 
 # @pytest.fixture
 # def mock_config_ava():

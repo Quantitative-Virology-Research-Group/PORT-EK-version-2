@@ -18,7 +18,21 @@ class BasePipeline:
         try:
             with open(f"{project_dir}/config.yaml", "r") as config_file:
                 config = yaml.safe_load(config_file)
+            if len(config["sample_groups"]) != len(config["input_files"]):
+                err_msg = "Number of sample groups and input fastas must match!"
+                raise ValueError()
+            if len(config["header_format"]) == 0:
+                self.header_format = ["plain" for _ in range(len(config["sample_groups"]))]
+            else:
+                if len(config["header_format"]) != len(config["sample_groups"]):
+                    err_msg = "Number of header formats must be 0 or match number of sample groups!"
+                    raise ValueError()
+                if any([header != "gisaid" and header != "ncbi" and header != "plain" for header in config["header_format"]]):
+                    err_msg = "Header format must be 'gisaid', 'ncbi' or 'plain'!"
+                    raise ValueError()
+                self.header_format = config["header_format"] 
             self.sample_groups = config["sample_groups"]
+            self.input_files = config["input_files"]
             self.mode = config["mode"]
             if self.mode == "ovr":
                 self.goi = config["goi"]
@@ -48,8 +62,8 @@ class BasePipeline:
             raise ValueError(err_msg)
         except KeyError:
             raise KeyError("Config file is missing required fields!")
-
-    def __init__(self, project_dir:str, k:int):
+        
+    def __init__(self, project_dir:str, k:int=5):
         if os.path.isdir(project_dir) == True:
             self.project_dir = project_dir
         else:
@@ -61,6 +75,8 @@ class BasePipeline:
             self.k = k
 
         self.sample_groups = None
+        self.input_files = None
+        self.header_format = None
         self.mode = None
         self.goi = None
         self.control_groups = None
