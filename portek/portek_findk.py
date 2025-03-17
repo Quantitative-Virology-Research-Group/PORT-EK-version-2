@@ -169,52 +169,34 @@ class KmerFinder(BasePipeline):
         return time_dict
 
 
-class FindOptimalKPipeline:
+class FindOptimalKPipeline(BasePipeline):
     """
     FindOptimalKPipeline:
     """
 
     def __init__(self, project_dir: str, mink: int, maxk: int, times) -> None:
-        if os.path.isdir(project_dir) == True:
-            self.project_dir = project_dir
-        else:
-            raise NotADirectoryError("Project directory does not exist!")
-
         if type(mink) != int or mink < 5 or mink % 2 == 0:
             raise TypeError(
                 "Minimum k must by an odd integer not smaller than 5!"
             )
         else:
             self.mink = mink
-
         if type(maxk) != int or maxk < 5 or maxk % 2 == 0:
             raise TypeError(
                 "Maximum k must by an odd integer not smaller than 5!"
             )
         else:
             self.maxk = maxk
-        try:
-            with open(f"{project_dir}/config.yaml", "r") as config_file:
-                config = yaml.safe_load(config_file)
-            self.sample_groups = config["sample_groups"]
-            self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
-            self.freq_cols = [f"{group}_freq" for group in self.sample_groups]
-            self.c_cols = [f"{group}_c" for group in self.sample_groups]
-            self.f_cols = [f"{group}_f" for group in self.sample_groups]
-            self.mode = config["mode"]
-            if self.mode == "ovr":
-                self.goi = config["goi"]
-                self.control_groups = self.sample_groups.copy()
-                self.control_groups.remove(self.goi)
-            else:
-                self.goi = None
-                self.control_groups = None
 
-        except:
-            raise FileNotFoundError(
-                f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
+        if self.maxk < self.mink:
+            raise ValueError("Minimum k must be no greater than maximum k!")
+        super().__init__(project_dir)
+        
         self.times = times
+        self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
+        self.freq_cols = [f"{group}_freq" for group in self.sample_groups]
+        self.c_cols = [f"{group}_c" for group in self.sample_groups]
+        self.f_cols = [f"{group}_f" for group in self.sample_groups]
 
     def _calc_metrics(self, k: int, verbose: bool = False):
 
