@@ -88,10 +88,8 @@ class MappingPipeline:
                 f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK enriched first!"
             )
 
-        self.mutations = None
         self.sample_list = None
         self.sample_group_dict = None
-        self.group_avg_pos = None
 
     def get_samples(self, verbose: bool = False):
         sample_list_in_path = pathlib.Path(f"{self.project_dir}/input/indices").glob(
@@ -115,6 +113,7 @@ class MappingPipeline:
         self.sample_list = sample_list
         self.sample_group_dict = sample_group_dict
 
+    #deprecated
     def _check_bowtie2_path(self):
         return shutil.which("bowtie2")
 
@@ -129,6 +128,7 @@ class MappingPipeline:
         else:
             return True
 
+    #deprecated
     def _bowtie_build_index(self, verbose: bool = False):
         if os.path.exists(f"{self.project_dir}/temp/ref_index/") == False:
             os.makedirs(f"{self.project_dir}/temp/ref_index")
@@ -147,6 +147,7 @@ class MappingPipeline:
             if verbose == True:
                 print(result.stdout)
 
+    #deprecated
     def _bowtie_map(self, verbose: bool = False):
         seed_length = int(math.ceil(self.k / 2))
         map_cmd = [

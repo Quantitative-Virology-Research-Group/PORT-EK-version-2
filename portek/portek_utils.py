@@ -2,12 +2,116 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import regex
+import os
+import yaml
+import pathlib
+import pickle
 from matplotlib import pyplot, collections, colormaps, patches, colors
 from datetime import datetime
 from scipy import stats
 from scipy.spatial import distance
 from scipy.cluster import hierarchy
 from Bio import SeqIO, SeqRecord, Seq
+
+class BasePipeline:
+    def _load_and_check_config(self, project_dir:str) -> None:
+        try:
+            with open(f"{project_dir}/config.yaml", "r") as config_file:
+                config = yaml.safe_load(config_file)
+            self.sample_groups = config["sample_groups"]
+            self.mode = config["mode"]
+            if self.mode == "ovr":
+                self.goi = config["goi"]
+                self.control_groups = self.sample_groups.copy()
+                self.control_groups.remove(self.goi)
+            elif self.mode == "ava":
+                self.goi = None
+                self.control_groups = None
+            else:
+                err_msg = "Unrecognized analysis mode, should by ava or ovr. Check your config file!"
+                raise ValueError()
+            self.ref_seq_name = ".".join(config["ref_seq"].split(".")[:-1])
+            try:
+                self.ref_seq = str(
+                    SeqIO.read(
+                        f"{project_dir}/input/{config['ref_seq']}", format="fasta"
+                    ).seq
+                )
+            except ValueError:
+                err_msg = "Missing reference sequence file or the file has incorrect format!"
+                raise ValueError()
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"No config.yaml file found in directory {project_dir}!"
+            )
+        except ValueError:
+            raise ValueError(err_msg)
+        except KeyError:
+            raise KeyError("Config file is missing required fields!")
+
+    def __init__(self, project_dir:str, k:int):
+        if os.path.isdir(project_dir) == True:
+            self.project_dir = project_dir
+        else:
+            raise NotADirectoryError("Project directory does not exist!")
+
+        if type(k) != int:
+            raise TypeError("k must by an integer!")
+        else:
+            self.k = k
+
+        self.sample_groups = None
+        self.mode = None
+        self.goi = None
+        self.control_groups = None
+        self.kmer_set = None
+        self.sample_list = None
+        self.sample_group_dict = None
+        self.ref_seq_name = None
+        self.ref_seq = None
+    
+        self._load_and_check_config(project_dir)
+
+    def _load_kmer_set(self) -> None:
+        kmer_set = set()
+        kmer_set_in_path = list(pathlib.Path(f"{self.project_dir}/input/indices/").glob(
+            f"{self.k}mer_*_set.pkl"
+        ))
+        if len(kmer_set_in_path) != len(self.sample_groups):
+            raise FileNotFoundError(
+                "Some or all k-mers are missing from the project directory! Please run PORTEK find_k!"
+            )
+        for filename in kmer_set_in_path:
+            with open(filename, mode="rb") as in_file:
+                partial_set = pickle.load(in_file)
+            kmer_set.update(partial_set)
+        kmer_set = list(kmer_set)
+        self.kmer_set = kmer_set
+
+    def _load_sample_list(self) -> None:
+        sample_list = []
+        sample_list_in_path = list(pathlib.Path(f"{self.project_dir}/input/indices").glob(
+            "*sample_list.pkl"
+        ))
+        if len(sample_list_in_path) != len(self.sample_groups):
+            raise FileNotFoundError(
+                "Some or all samples are missing from the project directory! Please run PORTEK find_k!"
+            )
+        for filename in sample_list_in_path:
+            with open(filename, mode="rb") as in_file:
+                partial_list = pickle.load(in_file)
+            group = filename.stem.split("_")[0]
+            partial_list = [f"{group}_{sample_name}" for sample_name in partial_list]
+            sample_list.extend(partial_list)
+        sample_group_dict = {
+            f"{group}": [
+                sample for sample in sample_list if sample.split("_")[0] == f"{group}"
+            ]
+            for group in self.sample_groups
+        }
+
+        self.sample_list = sample_list
+        self.sample_group_dict = sample_group_dict
 
 
 def encode_kmer(kmer_seq: str) -> int:

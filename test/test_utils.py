@@ -2,6 +2,11 @@ import pytest
 import pandas as pd
 from scipy import stats
 from portek import calc_kmer_pvalue
+from portek.portek_utils import BasePipeline
+
+class TestBasePiplelineLoadAndCheckConfig:
+    pass
+
 
 class TestCalcKmerPvalue:
     def test_calc_kmer_pvalue_success(self):
