@@ -145,20 +145,20 @@ class TestBasePipelineLoadKmerSet:
         kmer_set_path = test_project_dir / "input/indices/5mer_group2_set.pkl"
         with open(kmer_set_path, "wb") as f:
             pickle.dump({"GGGGG", "TTTTT"}, f)
-        test_base_pipeline._load_kmer_set()
+        test_base_pipeline.load_kmer_set(test_base_pipeline.k)
         assert set(test_base_pipeline.kmer_set) == {"AAAAA", "CCCCC", "GGGGG", "TTTTT"}
 
     def test_load_kmer_set_missing_files(self, test_base_pipeline):
-        with pytest.raises(FileNotFoundError, match="Some or all k-mers are missing from the project directory! Please run PORTEK find_k!"):
-            test_base_pipeline._load_kmer_set()
+        with pytest.raises(FileNotFoundError, match="Some or all 5-mers are missing from the project directory! Please run PORTEK find_k!"):
+            test_base_pipeline.load_kmer_set(test_base_pipeline.k)
 
     def test_load_kmer_set_partial_files(self, test_base_pipeline, test_project_dir):
         os.makedirs(test_project_dir / "input/indices")
         kmer_set_path = test_project_dir / "input/indices/5mer_group1_set.pkl"
         with open(kmer_set_path, "wb") as f:
             pickle.dump({"AAAAA", "CCCCC"}, f)
-        with pytest.raises(FileNotFoundError, match="Some or all k-mers are missing from the project directory! Please run PORTEK find_k!"):
-            test_base_pipeline._load_kmer_set()
+        with pytest.raises(FileNotFoundError, match="Some or all 5-mers are missing from the project directory! Please run PORTEK find_k!"):
+            test_base_pipeline.load_kmer_set(test_base_pipeline.k)
 
 class TestBasePipelineLoadSampleList:
     def test_load_sample_list_success(self, test_base_pipeline, test_project_dir):
@@ -169,12 +169,12 @@ class TestBasePipelineLoadSampleList:
         sample_list_path = test_project_dir / "input/indices/group2_sample_list.pkl"
         with open(sample_list_path, "wb") as f:
             pickle.dump(["sample1", "sample2"], f)
-        test_base_pipeline._load_sample_list()
+        test_base_pipeline.load_sample_list()
         assert sorted(test_base_pipeline.sample_list) == ["group1_sample1", "group1_sample2", "group2_sample1", "group2_sample2"]
 
     def test_load_sample_list_missing_files(self, test_base_pipeline):
         with pytest.raises(FileNotFoundError, match="Some or all samples are missing from the project directory! Please run PORTEK find_k!"):
-            test_base_pipeline._load_sample_list()
+            test_base_pipeline.load_sample_list()
 
     def test_load_sample_list_partial_files(self, test_base_pipeline, test_project_dir):
         os.makedirs(test_project_dir / "input/indices")
@@ -182,7 +182,7 @@ class TestBasePipelineLoadSampleList:
         with open(sample_list_path, "wb") as f:
             pickle.dump(["sample1", "sample2"], f)
         with pytest.raises(FileNotFoundError, match="Some or all samples are missing from the project directory! Please run PORTEK find_k!"):
-            test_base_pipeline._load_sample_list()
+            test_base_pipeline.load_sample_list()
 
 class TestBasePipelineCheckMinMaxK:
     @patch("builtins.open", new_callable=mock_open)
@@ -196,7 +196,7 @@ class TestBasePipelineCheckMinMaxK:
 
         #Execute & Verify
         with pytest.raises(TypeError, match="Minimum k must by an odd integer not smaller than 5!"):
-            pipeline._check_min_max_k("5",7)
+            pipeline.check_min_max_k("5",7)
     
     @patch("builtins.open", new_callable=mock_open)
     @patch("yaml.safe_load")
@@ -209,7 +209,7 @@ class TestBasePipelineCheckMinMaxK:
 
         #Execute & Verify
         with pytest.raises(TypeError, match="Minimum k must by an odd integer not smaller than 5!"):
-           pipeline._check_min_max_k(mink=6, maxk=7)
+           pipeline.check_min_max_k(mink=6, maxk=7)
 
     @patch("builtins.open", new_callable=mock_open)
     @patch("yaml.safe_load")
@@ -222,7 +222,7 @@ class TestBasePipelineCheckMinMaxK:
 
         #Execute & Verify
         with pytest.raises(TypeError, match="Minimum k must by an odd integer not smaller than 5!"):
-            pipeline._check_min_max_k(mink=3, maxk=7)
+            pipeline.check_min_max_k(mink=3, maxk=7)
 
     @patch("builtins.open", new_callable=mock_open)
     @patch("yaml.safe_load")
@@ -235,7 +235,7 @@ class TestBasePipelineCheckMinMaxK:
 
         #Execute & Verify
         with pytest.raises(TypeError, match="Maximum k must by an odd integer not smaller than 5!"):
-            pipeline._check_min_max_k(mink=5, maxk="7")
+            pipeline.check_min_max_k(mink=5, maxk="7")
     
     @patch("builtins.open", new_callable=mock_open)
     @patch("yaml.safe_load")
@@ -248,7 +248,7 @@ class TestBasePipelineCheckMinMaxK:
 
         #Execute & Verify
         with pytest.raises(TypeError, match="Maximum k must by an odd integer not smaller than 5!"):
-            pipeline._check_min_max_k(mink=5, maxk=8)
+            pipeline.check_min_max_k(mink=5, maxk=8)
 
     @patch("builtins.open", new_callable=mock_open)
     @patch("yaml.safe_load")
@@ -261,5 +261,5 @@ class TestBasePipelineCheckMinMaxK:
 
         #Execute & Verify
         with pytest.raises(ValueError, match="Minimum k must be no greater than maximum k!"):
-             pipeline._check_min_max_k(mink=15, maxk=5)
+             pipeline.check_min_max_k(mink=15, maxk=5)
 

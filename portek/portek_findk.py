@@ -41,7 +41,7 @@ class KmerFinder(BasePipeline):
             pickle.dump(sample_list, out_file, protocol=pickle.HIGHEST_PROTOCOL)
 
     def __init__(self, project_dir: str, mink: int, maxk: int) -> None:
-        super()._check_min_max_k(mink, maxk)
+        super().check_min_max_k(mink, maxk)
         super().__init__(project_dir)
         
         self.seq_lists = []
@@ -161,7 +161,7 @@ class FindOptimalKPipeline(BasePipeline):
     """
 
     def __init__(self, project_dir: str, mink: int, maxk: int, times) -> None:
-        super()._check_min_max_k(mink, maxk)
+        super().check_min_max_k(mink, maxk)
         super().__init__(project_dir)
 
         self.times = times
@@ -175,31 +175,8 @@ class FindOptimalKPipeline(BasePipeline):
         start_time = process_time()
         if verbose == True:
             print(f"Calculating metrics for {k}-mers.", flush=True)
-        kmer_set = set()
-        sample_list = []
-        kmer_set_in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
-            f"{k}mer_*_set.pkl"
-        )
-        sample_list_in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
-            "*sample_list.pkl"
-        )
-
-        for filename in kmer_set_in_path:
-            with open(filename, mode="rb") as in_file:
-                partial_set = pickle.load(in_file)
-            kmer_set.update(partial_set)
-        if len(kmer_set) == 0:
-            if verbose == True:
-                print(f"No {k}-mers found. Skipping.", flush=True)
-            return None
-        kmer_set = list(kmer_set)
-
-        for filename in sample_list_in_path:
-            with open(filename, mode="rb") as in_file:
-                partial_list = pickle.load(in_file)
-            group = filename.stem.split("_")[0]
-            partial_list = [f"{group}_{sample_name}" for sample_name in partial_list]
-            sample_list.extend(partial_list)
+        kmer_set = super().load_kmer_set(k)
+        sample_list = super().load_sample_list()
 
         all_kmer_stat_matrix = pd.DataFrame(
             0.0,

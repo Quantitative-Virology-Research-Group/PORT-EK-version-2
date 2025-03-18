@@ -88,14 +88,14 @@ class BasePipeline:
     
         self._load_and_check_config(project_dir)
 
-    def _load_kmer_set(self) -> None:
+    def load_kmer_set(self, k) -> list:
         kmer_set = set()
         kmer_set_in_path = list(pathlib.Path(f"{self.project_dir}/input/indices/").glob(
-            f"{self.k}mer_*_set.pkl"
+            f"{k}mer_*_set.pkl"
         ))
         if len(kmer_set_in_path) != len(self.sample_groups):
             raise FileNotFoundError(
-                "Some or all k-mers are missing from the project directory! Please run PORTEK find_k!"
+                f"Some or all {k}-mers are missing from the project directory! Please run PORTEK find_k!"
             )
         for filename in kmer_set_in_path:
             with open(filename, mode="rb") as in_file:
@@ -103,8 +103,9 @@ class BasePipeline:
             kmer_set.update(partial_set)
         kmer_set = list(kmer_set)
         self.kmer_set = kmer_set
-
-    def _load_sample_list(self) -> None:
+        return kmer_set
+    
+    def load_sample_list(self) -> list:
         sample_list = []
         sample_list_in_path = list(pathlib.Path(f"{self.project_dir}/input/indices").glob(
             "*sample_list.pkl"
@@ -128,8 +129,9 @@ class BasePipeline:
 
         self.sample_list = sample_list
         self.sample_group_dict = sample_group_dict
+        return sample_list
 
-    def _check_min_max_k(self, mink:int, maxk:int) -> None:
+    def check_min_max_k(self, mink:int, maxk:int) -> None:
         if type(mink) != int or mink < 5 or mink % 2 == 0:
             raise TypeError(
                 "Minimum k must by an odd integer not smaller than 5!"
