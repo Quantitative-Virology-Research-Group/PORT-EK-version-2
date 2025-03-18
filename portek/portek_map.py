@@ -7,6 +7,7 @@ import pathlib
 import pickle
 import shutil
 import subprocess
+import json
 
 import matplotlib.axes
 import matplotlib.pyplot as plt
@@ -22,6 +23,50 @@ from scipy.signal import find_peaks
 from scipy.stats import linregress
 
 import portek
+from portek.portek_utils import BasePipeline
+
+class RefSeqIndexer(BasePipeline):
+    
+    def _check_index(self, dist: int) -> bool:
+        return pathlib.Path(f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl").exists()
+
+    def index_ref_seq(self,dist:int, verbose:bool = False) -> dict:
+        if self._check_index(dist) == False:
+            if verbose == True:
+                print(f"No {self.k}-mer index with maximum distance {dist} exists for {self.ref_seq_name}, building index.")
+            bit_ref_seq = portek.encode_seq(self.ref_seq)
+            kmer_index = {dist:{} for dist in range(dist+1)}
+            for i in range(0, len(bit_ref_seq) - self.k + 1):
+                bit_kmer = bit_ref_seq[i : i + self.k]
+                if "X" not in bit_kmer:
+                    int_kmer0 = int("".join(bit_kmer), base=2)
+                    if int_kmer0 in kmer_index[0].keys():
+                        kmer_index[0][int_kmer0].append(i + 1)
+                    else:
+                        kmer_index[0][int_kmer0] = [i + 1]
+
+                    for d in range(1,dist+1):
+                        all_bit_kmers_del_d = set(itertools.combinations(bit_kmer,len(bit_kmer)-d))
+                        all_int_kmers_del_d = [int("".join(bit_kmer_del_d), base=2) for bit_kmer_del_d in all_bit_kmers_del_d]
+                        for int_kmer_del_d in all_int_kmers_del_d:
+                            if int_kmer_del_d in kmer_index[d].keys():
+                                kmer_index[d][int_kmer_del_d].append(i + 1)
+                            else:
+                                kmer_index[d][int_kmer_del_d] = [i+1]
+
+            with open(f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl", mode="wb") as out_file:
+                pickle.dump(kmer_index, out_file)
+            if verbose == True:
+                print(f"Finished building {self.k}-mer index with maximum distance {dist} exists for {self.ref_seq_name}")
+                for d in range(dist+1):
+                    print(f"Extracted {len(kmer_index[d])} k-mers with distance {d}.")           
+            return kmer_index     
+        else:
+            if verbose == True:
+                print(f"{self.k}-mer index with maximum distance {dist} for {self.ref_seq_name} already exists.")
+            with open(f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl", mode="rb") as in_file:
+                kmer_index = pickle.load(in_file)
+            return kmer_index
 
 
 class MappingPipeline:

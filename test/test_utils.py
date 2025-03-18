@@ -2,6 +2,7 @@ import pytest
 import pickle
 import os
 from unittest.mock import patch, mock_open, MagicMock
+import portek
 from portek.portek_utils import BasePipeline
 
 
@@ -160,6 +161,7 @@ class TestBasePipelineLoadKmerSet:
         with pytest.raises(FileNotFoundError, match="Some or all 5-mers are missing from the project directory! Please run PORTEK find_k!"):
             test_base_pipeline.load_kmer_set(test_base_pipeline.k)
 
+
 class TestBasePipelineLoadSampleList:
     def test_load_sample_list_success(self, test_base_pipeline, test_project_dir):
         os.makedirs(test_project_dir / "input/indices")
@@ -183,6 +185,7 @@ class TestBasePipelineLoadSampleList:
             pickle.dump(["sample1", "sample2"], f)
         with pytest.raises(FileNotFoundError, match="Some or all samples are missing from the project directory! Please run PORTEK find_k!"):
             test_base_pipeline.load_sample_list()
+
 
 class TestBasePipelineCheckMinMaxK:
     @patch("builtins.open", new_callable=mock_open)
@@ -263,3 +266,19 @@ class TestBasePipelineCheckMinMaxK:
         with pytest.raises(ValueError, match="Minimum k must be no greater than maximum k!"):
              pipeline.check_min_max_k(mink=15, maxk=5)
 
+
+class TestEncodeSeq:
+    def test_encode_seq_valid_input(self):
+        assert portek.encode_seq("ACGT") == ["00", "01", "10", "11"]
+        assert portek.encode_seq("A") == ["00"]
+        assert portek.encode_seq("C") == ["01"]
+        assert portek.encode_seq("G") == ["10"]
+        assert portek.encode_seq("T") == ["11"]
+
+    def test_encode_seq_invalid_input(self):
+        assert portek.encode_seq("N") == ["X"]
+        assert portek.encode_seq("ACGN") == ["00", "01", "10", "X"]
+        assert portek.encode_seq("") == []
+
+    def test_encode_seq_mixed_case(self):
+        assert portek.encode_seq("aCgT") == ["00", "01", "10", "11"]

@@ -9,6 +9,7 @@ from collections import defaultdict
 from time import process_time
 from Bio import SeqIO
 
+import portek
 from portek.portek_utils import BasePipeline
 
 class KmerFinder(BasePipeline):
@@ -55,11 +56,6 @@ class KmerFinder(BasePipeline):
         start_time = process_time()
         if verbose == True:
             print(f"Finding all {k}-mers in {group} sequences.", flush=True)
-        encoding = defaultdict(self._unknown_nuc)
-        encoding["A"] = "00"
-        encoding["C"] = "01"
-        encoding["G"] = "10"
-        encoding["T"] = "11"
         kmer_set = set()
 
         group_size = len(seq_list)
@@ -68,7 +64,7 @@ class KmerFinder(BasePipeline):
         kmers_pos_dict = {}
         for seq in seq_list:
             seqid = seq.id
-            seq = [encoding[nuc] for nuc in seq.seq]
+            seq = portek.encode_seq(seq.seq)
             kmers_dict = {}
 
             for i in range(0, len(seq) - k + 1):

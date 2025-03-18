@@ -148,6 +148,13 @@ class BasePipeline:
             raise ValueError("Minimum k must be no greater than maximum k!")
         
 
+def encode_seq(nuc_seq: str) -> list[str]:
+    nuc_seq_upper  = nuc_seq.upper()
+    encoding = {"A":"00","C":"01","G":"10","T":"11"}
+    bit_seq = [encoding.get(nuc,"X") for nuc in nuc_seq_upper]
+    return bit_seq
+
+
 def encode_kmer(kmer_seq: str) -> int:
     encoding_dict = {"A": "00", "C": "01", "G": "10", "T": "11"}
     kmer_bin_string = [encoding_dict[nuc] for nuc in kmer_seq]
