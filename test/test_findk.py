@@ -69,71 +69,28 @@ class TestKmerFinderInit:
 
         #Execute & Verify
         with pytest.raises(ValueError, match="Sequence ids cannot contain '/'. Specify correct header formats in the config file."):
-            kmer_finder = KmerFinder(test_project_dir, mink=5, maxk=7)
+            KmerFinder(test_project_dir, mink=5, maxk=7)
 
 
-    @patch("builtins.open", new_callable=mock_open)
+class TestFindOptimalKPipeline:
     @patch("yaml.safe_load")
     @patch("Bio.SeqIO.read")
-    def test_invalid_mink_type(self, mock_read, mock_load, mock_open, test_project_dir, valid_config_no_header):
+    def test_valid_init(self, mock_read, mock_load, test_project_dir, valid_config_no_header):
         #Setup
         mock_load.return_value = valid_config_no_header
         mock_read.return_value.seq = "ATGCATGC"
+        times = {5:10}
+        with open(test_project_dir / "config.yaml", "w") as f:
+            yaml.safe_dump(valid_config_no_header, f)
 
-        with pytest.raises(TypeError, match="Minimum k must by an odd integer not smaller than 5!"):
-            KmerFinder(test_project_dir, mink="5", maxk=7)
-    
-    @patch("builtins.open", new_callable=mock_open)
-    @patch("yaml.safe_load")
-    @patch("Bio.SeqIO.read")
-    def test_mink_even(self, mock_read, mock_load, mock_open, test_project_dir, valid_config_no_header):
-        #Setup
-        mock_load.return_value = valid_config_no_header
-        mock_read.return_value.seq = "ATGCATGC"
-        with pytest.raises(TypeError, match="Minimum k must by an odd integer not smaller than 5!"):
-            KmerFinder(test_project_dir, mink=6, maxk=7)
+        #Execute
+        findk_pipeline = FindOptimalKPipeline(test_project_dir, mink=5, maxk=7, times=times)
 
-    @patch("builtins.open", new_callable=mock_open)
-    @patch("yaml.safe_load")
-    @patch("Bio.SeqIO.read")
-    def test_mink_small(self, mock_read, mock_load, mock_open, test_project_dir, valid_config_no_header):
-        #Setup
-        mock_load.return_value = valid_config_no_header
-        mock_read.return_value.seq = "ATGCATGC"
-
-        with pytest.raises(TypeError, match="Minimum k must by an odd integer not smaller than 5!"):
-            KmerFinder(test_project_dir, mink=3, maxk=7)
-
-    @patch("builtins.open", new_callable=mock_open)
-    @patch("yaml.safe_load")
-    @patch("Bio.SeqIO.read")
-    def test_invalid_maxk_type(self, mock_read, mock_load, mock_open, test_project_dir, valid_config_no_header):
-        #Setup
-        mock_load.return_value = valid_config_no_header
-        mock_read.return_value.seq = "ATGCATGC"
-
-        with pytest.raises(TypeError, match="Maximum k must by an odd integer not smaller than 5!"):
-            KmerFinder(test_project_dir, mink=5, maxk="7")
-    
-    @patch("builtins.open", new_callable=mock_open)
-    @patch("yaml.safe_load")
-    @patch("Bio.SeqIO.read")
-    def test_maxk_even(self, mock_read, mock_load, mock_open, test_project_dir, valid_config_no_header):
-        #Setup
-        mock_load.return_value = valid_config_no_header
-        mock_read.return_value.seq = "ATGCATGC"
-
-        with pytest.raises(TypeError, match="Maximum k must by an odd integer not smaller than 5!"):
-            KmerFinder(test_project_dir, mink=5, maxk=8)
-
-    @patch("builtins.open", new_callable=mock_open)
-    @patch("yaml.safe_load")
-    @patch("Bio.SeqIO.read")
-    def test_maxk_less_than_mink(self, mock_read, mock_load, mock_open, test_project_dir, valid_config_no_header):
-        #Setup
-        mock_load.return_value = valid_config_no_header
-        mock_read.return_value.seq = "ATGCATGC"
-
-        with pytest.raises(ValueError, match="Minimum k must be no greater than maximum k!"):
-            KmerFinder(test_project_dir, mink=15, maxk=5)
-
+        #Verify
+        assert findk_pipeline.mink == 5
+        assert findk_pipeline.maxk == 7
+        assert findk_pipeline.times == {5:10}
+        assert findk_pipeline.avg_cols == ["group1_avg","group2_avg"]
+        assert findk_pipeline.freq_cols == ["group1_freq","group2_freq"]
+        assert findk_pipeline.c_cols == ["group1_c","group2_c"]
+        assert findk_pipeline.f_cols == ["group1_f","group2_f"]

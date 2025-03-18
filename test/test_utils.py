@@ -151,17 +151,17 @@ class TestBasePipelineLoadKmerSet:
         test_base_pipeline._load_kmer_set()
         assert set(test_base_pipeline.kmer_set) == {"AAAAA", "CCCCC", "GGGGG", "TTTTT"}
 
-def test_load_kmer_set_missing_files(test_base_pipeline):
-    with pytest.raises(FileNotFoundError, match="Some or all k-mers are missing from the project directory! Please run PORTEK find_k!"):
-        test_base_pipeline._load_kmer_set()
+    def test_load_kmer_set_missing_files(self, test_base_pipeline):
+        with pytest.raises(FileNotFoundError, match="Some or all k-mers are missing from the project directory! Please run PORTEK find_k!"):
+            test_base_pipeline._load_kmer_set()
 
-def test_load_kmer_set_partial_files(test_base_pipeline, test_project_dir):
-    os.makedirs(test_project_dir / "input/indices")
-    kmer_set_path = test_project_dir / "input/indices/5mer_group1_set.pkl"
-    with open(kmer_set_path, "wb") as f:
-        pickle.dump({"AAAAA", "CCCCC"}, f)
-    with pytest.raises(FileNotFoundError, match="Some or all k-mers are missing from the project directory! Please run PORTEK find_k!"):
-        test_base_pipeline._load_kmer_set()
+    def test_load_kmer_set_partial_files(self, test_base_pipeline, test_project_dir):
+        os.makedirs(test_project_dir / "input/indices")
+        kmer_set_path = test_project_dir / "input/indices/5mer_group1_set.pkl"
+        with open(kmer_set_path, "wb") as f:
+            pickle.dump({"AAAAA", "CCCCC"}, f)
+        with pytest.raises(FileNotFoundError, match="Some or all k-mers are missing from the project directory! Please run PORTEK find_k!"):
+            test_base_pipeline._load_kmer_set()
 
 class TestBasePipelineLoadSampleList:
     def test_load_sample_list_success(self, test_base_pipeline, test_project_dir):
@@ -175,17 +175,97 @@ class TestBasePipelineLoadSampleList:
         test_base_pipeline._load_sample_list()
         assert sorted(test_base_pipeline.sample_list) == ["group1_sample1", "group1_sample2", "group2_sample1", "group2_sample2"]
 
-def test_load_sample_list_missing_files(test_base_pipeline):
-    with pytest.raises(FileNotFoundError, match="Some or all samples are missing from the project directory! Please run PORTEK find_k!"):
-        test_base_pipeline._load_sample_list()
+    def test_load_sample_list_missing_files(self, test_base_pipeline):
+        with pytest.raises(FileNotFoundError, match="Some or all samples are missing from the project directory! Please run PORTEK find_k!"):
+            test_base_pipeline._load_sample_list()
 
-def test_load_sample_list_partial_files(test_base_pipeline, test_project_dir):
-    os.makedirs(test_project_dir / "input/indices")
-    sample_list_path = test_project_dir / "input/indices/group1_sample_list.pkl"
-    with open(sample_list_path, "wb") as f:
-        pickle.dump(["sample1", "sample2"], f)
-    with pytest.raises(FileNotFoundError, match="Some or all samples are missing from the project directory! Please run PORTEK find_k!"):
-        test_base_pipeline._load_sample_list()
+    def test_load_sample_list_partial_files(self, test_base_pipeline, test_project_dir):
+        os.makedirs(test_project_dir / "input/indices")
+        sample_list_path = test_project_dir / "input/indices/group1_sample_list.pkl"
+        with open(sample_list_path, "wb") as f:
+            pickle.dump(["sample1", "sample2"], f)
+        with pytest.raises(FileNotFoundError, match="Some or all samples are missing from the project directory! Please run PORTEK find_k!"):
+            test_base_pipeline._load_sample_list()
+
+class TestBasePipelineCheckMinMaxK:
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("yaml.safe_load")
+    @patch("Bio.SeqIO.read")
+    def test_invalid_mink_type(self, mock_read, mock_load, mock_open, test_project_dir, valid_config_no_header):
+        #Setup
+        mock_load.return_value = valid_config_no_header
+        mock_read.return_value.seq = "ATGCATGC"
+        pipeline = BasePipeline(test_project_dir, 5)
+
+        #Execute & Verify
+        with pytest.raises(TypeError, match="Minimum k must by an odd integer not smaller than 5!"):
+            pipeline._check_min_max_k("5",7)
+    
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("yaml.safe_load")
+    @patch("Bio.SeqIO.read")
+    def test_mink_even(self, mock_read, mock_load, mock_open, test_project_dir, valid_config_no_header):
+        #Setup
+        mock_load.return_value = valid_config_no_header
+        mock_read.return_value.seq = "ATGCATGC"
+        pipeline = BasePipeline(test_project_dir, 5)
+
+        #Execute & Verify
+        with pytest.raises(TypeError, match="Minimum k must by an odd integer not smaller than 5!"):
+           pipeline._check_min_max_k(mink=6, maxk=7)
+
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("yaml.safe_load")
+    @patch("Bio.SeqIO.read")
+    def test_mink_small(self, mock_read, mock_load, mock_open, test_project_dir, valid_config_no_header):
+        #Setup
+        mock_load.return_value = valid_config_no_header
+        mock_read.return_value.seq = "ATGCATGC"
+        pipeline = BasePipeline(test_project_dir, 5)
+
+        #Execute & Verify
+        with pytest.raises(TypeError, match="Minimum k must by an odd integer not smaller than 5!"):
+            pipeline._check_min_max_k(mink=3, maxk=7)
+
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("yaml.safe_load")
+    @patch("Bio.SeqIO.read")
+    def test_invalid_maxk_type(self, mock_read, mock_load, mock_open, test_project_dir, valid_config_no_header):
+        #Setup
+        mock_load.return_value = valid_config_no_header
+        mock_read.return_value.seq = "ATGCATGC"
+        pipeline = BasePipeline(test_project_dir, 5)
+
+        #Execute & Verify
+        with pytest.raises(TypeError, match="Maximum k must by an odd integer not smaller than 5!"):
+            pipeline._check_min_max_k(mink=5, maxk="7")
+    
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("yaml.safe_load")
+    @patch("Bio.SeqIO.read")
+    def test_maxk_even(self, mock_read, mock_load, mock_open, test_project_dir, valid_config_no_header):
+        #Setup
+        mock_load.return_value = valid_config_no_header
+        mock_read.return_value.seq = "ATGCATGC"
+        pipeline = BasePipeline(test_project_dir, 5)
+
+        #Execute & Verify
+        with pytest.raises(TypeError, match="Maximum k must by an odd integer not smaller than 5!"):
+            pipeline._check_min_max_k(mink=5, maxk=8)
+
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("yaml.safe_load")
+    @patch("Bio.SeqIO.read")
+    def test_maxk_less_than_mink(self, mock_read, mock_load, mock_open, test_project_dir, valid_config_no_header):
+        #Setup
+        mock_load.return_value = valid_config_no_header
+        mock_read.return_value.seq = "ATGCATGC"
+        pipeline = BasePipeline(test_project_dir, 5)
+
+        #Execute & Verify
+        with pytest.raises(ValueError, match="Minimum k must be no greater than maximum k!"):
+             pipeline._check_min_max_k(mink=15, maxk=5)
+
 
 class TestCalcKmerPvalue:
     def test_calc_kmer_pvalue_success(self):

@@ -129,7 +129,23 @@ class BasePipeline:
         self.sample_list = sample_list
         self.sample_group_dict = sample_group_dict
 
-
+    def _check_min_max_k(self, mink:int, maxk:int) -> None:
+        if type(mink) != int or mink < 5 or mink % 2 == 0:
+            raise TypeError(
+                "Minimum k must by an odd integer not smaller than 5!"
+            )
+        else:
+            self.mink = mink
+        if type(maxk) != int or maxk < 5 or maxk % 2 == 0:
+            raise TypeError(
+                "Maximum k must by an odd integer not smaller than 5!"
+            )
+        else:
+            self.maxk = maxk
+        if self.maxk < self.mink:
+            raise ValueError("Minimum k must be no greater than maximum k!")
+        
+        
 def encode_kmer(kmer_seq: str) -> int:
     encoding_dict = {"A": "00", "C": "01", "G": "10", "T": "11"}
     kmer_bin_string = [encoding_dict[nuc] for nuc in kmer_seq]

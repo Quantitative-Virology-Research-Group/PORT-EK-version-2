@@ -41,22 +41,7 @@ class KmerFinder(BasePipeline):
             pickle.dump(sample_list, out_file, protocol=pickle.HIGHEST_PROTOCOL)
 
     def __init__(self, project_dir: str, mink: int, maxk: int) -> None:
-
-        if type(mink) != int or mink < 5 or mink % 2 == 0:
-            raise TypeError(
-                "Minimum k must by an odd integer not smaller than 5!"
-            )
-        else:
-            self.mink = mink
-        if type(maxk) != int or maxk < 5 or maxk % 2 == 0:
-            raise TypeError(
-                "Maximum k must by an odd integer not smaller than 5!"
-            )
-        else:
-            self.maxk = maxk
-
-        if self.maxk < self.mink:
-            raise ValueError("Minimum k must be no greater than maximum k!")
+        super()._check_min_max_k(mink, maxk)
         super().__init__(project_dir)
         
         self.seq_lists = []
@@ -176,21 +161,7 @@ class FindOptimalKPipeline(BasePipeline):
     """
 
     def __init__(self, project_dir: str, mink: int, maxk: int, times) -> None:
-        if type(mink) != int or mink < 5 or mink % 2 == 0:
-            raise TypeError(
-                "Minimum k must by an odd integer not smaller than 5!"
-            )
-        else:
-            self.mink = mink
-        if type(maxk) != int or maxk < 5 or maxk % 2 == 0:
-            raise TypeError(
-                "Maximum k must by an odd integer not smaller than 5!"
-            )
-        else:
-            self.maxk = maxk
-
-        if self.maxk < self.mink:
-            raise ValueError("Minimum k must be no greater than maximum k!")
+        super()._check_min_max_k(mink, maxk)
         super().__init__(project_dir)
 
         self.times = times
