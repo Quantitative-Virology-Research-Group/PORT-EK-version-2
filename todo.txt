@@ -1,4 +1,6 @@
 classification in one module - portek_classify
+move kmer stats calculations by OptimalKFinder and EnrichedKmersPipeline to BasePipeline
+implement custom mapper besed on indexing and deletion trick
 add enriched/conserved/variable genome regions plots
 add max data frame memory size as a parameter
 clean up prints
