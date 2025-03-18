@@ -10,7 +10,7 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument(
     "tool",
-    help="Name of the PORT-EK function you want to execute. Choose one of: new, find_k, enriched, map, classify",
+    help="Name of the PORT-EK function you want to execute. Choose one of: new, find_k, find_enriched, map, classify",
 )
 
 parser.add_argument(
@@ -87,7 +87,7 @@ def main():
         running_time = end_timeS_ARE_NOT_CANON - start_time
         print(f"\nTotal running time: {running_time}")
 
-    elif args.tool == "enriched":
+    elif args.tool == "find_enriched":
         start_time = datetime.now()
         enriched_kmers_finder = portek.EnrichedKmersPipeline(args.project_dir, args.k)
         enriched_kmers_finder.get_basic_kmer_stats()
