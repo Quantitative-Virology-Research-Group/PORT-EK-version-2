@@ -24,13 +24,26 @@ from scipy.stats import linregress
 
 import portek
 from portek.portek_utils import BasePipeline
+  
+  
+class MappingPipeline(BasePipeline):
 
-class RefSeqIndexer(BasePipeline):
-    
+    def __init__(self, project_dir: str, k:int):
+        super().__init__(project_dir, k)
+        self.matrices = {}
+        try:
+            self.matrices["enriched"] = pd.read_csv(
+                f"{project_dir}/output/enriched_{self.k}mers_stats.csv", index_col=0
+            )
+        except:
+            raise FileNotFoundError(
+                f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK find_enriched first!"
+            )
+        
     def _check_index(self, dist: int) -> bool:
         return pathlib.Path(f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl").exists()
 
-    def index_ref_seq(self,dist:int, verbose:bool = False) -> dict:
+    def index_ref_seq(self,dist:int, verbose:bool = False) -> None:
         if self._check_index(dist) == False:
             if verbose == True:
                 print(f"No {self.k}-mer index with maximum distance {dist} exists for {self.ref_seq_name}, building index.")
@@ -60,231 +73,16 @@ class RefSeqIndexer(BasePipeline):
                 print(f"Finished building {self.k}-mer index with maximum distance {dist} exists for {self.ref_seq_name}")
                 for d in range(dist+1):
                     print(f"Extracted {len(kmer_index[d])} k-mers with distance {d}.")           
-            return kmer_index     
+            self.kmer_index = kmer_index    
         else:
             if verbose == True:
                 print(f"{self.k}-mer index with maximum distance {dist} for {self.ref_seq_name} already exists.")
             with open(f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl", mode="rb") as in_file:
                 kmer_index = pickle.load(in_file)
-            return kmer_index
-
-
-class MappingPipeline:
-
-    def __init__(self, project_dir: str, k):
-        if os.path.isdir(project_dir) == True:
-            self.project_dir = project_dir
-        else:
-            raise NotADirectoryError("Project directory does not exist!")
-
-        if type(k) != int:
-            raise TypeError("k must by an integer!")
-        else:
-            self.k = k
-
-        try:
-            with open(f"{project_dir}/config.yaml", "r") as config_file:
-                config = yaml.safe_load(config_file)
-            self.sample_groups = config["sample_groups"]
-            self.mode = config["mode"]
-            if self.mode == "ovr":
-                self.goi = config["goi"]
-                self.control_groups = self.sample_groups.copy()
-                self.control_groups.remove(self.goi)
-            elif self.mode == "ava":
-                self.goi = None
-                self.control_groups = None
-            else:
-                err_msg = "Unrecognized analysis mode, should by ava or ovr. Check your config file!"
-                raise ValueError()
-
-            self.ref_seq_name = ".".join(config["ref_seq"].split(".")[:-1])
-            try:
-                self.ref_seq = str(
-                    SeqIO.read(
-                        f"{project_dir}/input/{config['ref_seq']}", format="fasta"
-                    ).seq
-                )
-            except ValueError:
-                err_msg = "No or wrong reference sequence file!"
-                raise ValueError()
-            if "ref_genes" in config.keys():
-                self.ref_genes = config["ref_genes"]
-            else:
-                self.ref_genes = None
-
-            self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
-
-        except FileNotFoundError:
-            raise FileNotFoundError(
-                f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
-        except ValueError:
-            raise ValueError(err_msg)
-
-        self.matrices = {}
-        try:
-            self.matrices["enriched"] = pd.read_csv(
-                f"{project_dir}/output/enriched_{self.k}mers_stats.csv", index_col=0
-            )
-
-        except:
-            raise FileNotFoundError(
-                f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK enriched first!"
-            )
-
-        self.sample_list = None
-        self.sample_group_dict = None
-
-    def get_samples(self, verbose: bool = False):
-        sample_list_in_path = pathlib.Path(f"{self.project_dir}/input/indices").glob(
-            "*sample_list.pkl"
-        )
-        sample_list = []
-        for filename in sample_list_in_path:
-            with open(filename, mode="rb") as in_file:
-                partial_list = pickle.load(in_file)
-            group = filename.stem.split("_")[0]
-            partial_list = [f"{group}_{sample_name}" for sample_name in partial_list]
-            sample_list.extend(partial_list)
-        sample_group_dict = {
-            f"{group}": [
-                sample for sample in sample_list if sample.split("_")[0] == f"{group}"
-            ]
-            for group in self.sample_groups
-        }
-        if len(sample_list) == 0:
-            raise FileNotFoundError("No sample lists found!")
-        self.sample_list = sample_list
-        self.sample_group_dict = sample_group_dict
-
-    #deprecated
-    def _check_bowtie2_path(self):
-        return shutil.which("bowtie2")
-
-    def _check_index_built(self):
-        index_files = list(
-            pathlib.Path(f"{self.project_dir}/temp/ref_index/").glob(
-                f"{self.ref_seq_name}.*"
-            )
-        )
-        if len(index_files) == 0:
-            return False
-        else:
-            return True
-
-    #deprecated
-    def _bowtie_build_index(self, verbose: bool = False):
-        if os.path.exists(f"{self.project_dir}/temp/ref_index/") == False:
-            os.makedirs(f"{self.project_dir}/temp/ref_index")
-        build_cmd = [
-            f"bowtie2-build",
-            "-f",
-            f"{self.project_dir}/input/{self.ref_seq_name}.fasta",
-            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}",
-        ]
-        result = subprocess.run(build_cmd, capture_output=True, text=True)
-        if verbose == True:
-            print(build_cmd)
-        if result.returncode != 0:
-            raise Exception(result.stderr)
-        else:
-            if verbose == True:
-                print(result.stdout)
-
-    #deprecated
-    def _bowtie_map(self, verbose: bool = False):
-        seed_length = int(math.ceil(self.k / 2))
-        map_cmd = [
-            f"bowtie2",
-            "--norc",
-            "-a",
-            "-L",
-            f"{seed_length}",
-            "--score-min",
-            "L,-0.6,-1",
-            "-x",
-            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}",
-            "-f",
-            f"{self.project_dir}/temp/enriched_{self.k}mers.fasta",
-            "-S",
-            f"{self.project_dir}/temp/enriched_{self.k}mers.sam",
-        ]
-        if verbose == True:
-            print(" ".join(map_cmd))
-        result = subprocess.run(map_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise Exception(result.stderr)
-        else:
-            if verbose == True:
-                print(result.stdout)
+            self.kmer_index = kmer_index 
 
     def run_mapping(self, verbose: bool = False):
-        if self._check_bowtie2_path() == None:
-            raise FileNotFoundError(
-                f"bowtie2 not found! Please install bowtie and add it to your PATH!"
-            )
-        if self._check_index_built() == False:
-            self._bowtie_build_index(verbose=verbose)
-        self._bowtie_map(verbose=verbose)
-
-    def _parse_CIGAR(self, CIGAR_string: str) -> dict:
-        n_repeats = regex.findall(r"\d+", CIGAR_string)
-        matches = [char for char in CIGAR_string if char.isalpha()]
-        CIGAR_list = []
-        for n, m in zip(n_repeats, matches):
-            CIGAR_list.extend(int(n) * [m])
-        return CIGAR_list
-
-    def _read_sam_to_df(self) -> pd.DataFrame:
-        reads = pysam.AlignmentFile(
-            f"{self.project_dir}/temp/enriched_{self.k}mers.sam", mode="r"
-        )
-
-        read_dict = {
-            "kmer": [],
-            "flag": [],
-            "ref_pos": [],
-            "CIGAR": [],
-            "n_mismatch": [],
-            "score": [],
-        }
-        for read in reads:
-            read_dict["kmer"].append(read.query_name)
-            read_dict["flag"].append(read.flag)
-            if read.reference_start == -1:
-                read_dict["ref_pos"].append(0)
-            else:
-                read_dict["ref_pos"].append(read.reference_start)
-            if read.cigarstring == None:
-                read_dict["CIGAR"].append("")
-            else:
-                read_dict["CIGAR"].append(read.cigarstring)
-            if read.has_tag("NM"):
-                read_dict["n_mismatch"].append(read.get_tag("NM", False))
-            else:
-                read_dict["n_mismatch"].append(0)
-            if read.has_tag("AS"):
-                read_dict["score"].append(read.get_tag("AS", False))
-            else:
-                read_dict["score"].append(-6 * self.k)
-
-        mappings_df = pd.DataFrame(read_dict)
-        mappings_df["CIGAR"] = mappings_df["CIGAR"].apply(self._parse_CIGAR)
-        mappings_df.loc[:, ["flag", "ref_pos", "n_mismatch"]] = mappings_df.loc[
-            :, ["flag", "ref_pos", "n_mismatch"]
-        ].astype(int)
-        mappings_df["group"] = self.matrices["enriched"]["group"]
-        mappings_df["mutations"] = "WT"
-        mappings_df["mapping_ok"] = 1
-        mappings_df["ref_pos"] = mappings_df.apply(
-            lambda row: row["ref_pos"] + 1 if row["flag"] != 4 else row["ref_pos"],
-            axis=1,
-        )
-        mappings_df["group"] = mappings_df["kmer"].apply(
-            lambda kmer: self.matrices["enriched"].loc[kmer, "group"]
-        )
-        return mappings_df
+        pass
 
     def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
         ref_start = map_pos

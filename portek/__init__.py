@@ -9,5 +9,4 @@ from .portek_utils import save_kmers_fasta
 from .portek_findk import KmerFinder
 from .portek_findk import FindOptimalKPipeline
 from .portek_enriched import EnrichedKmersPipeline
-from .portek_map import RefSeqIndexer
 from .portek_map import MappingPipeline

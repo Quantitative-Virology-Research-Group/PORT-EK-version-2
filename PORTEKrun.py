@@ -21,14 +21,14 @@ parser.add_argument(
 
 parser.add_argument(
     "-min_k",
-    help="Minimum k value to test with PORT-EK find_k. PORT-EK will test all odd k values from min_k up to and including max_k.",
+    help="Minimum k value to test with PORT-EK find_k. PORT-EK will test all odd k values from min_k up to and including max_k. Default 5.",
     type=int,
     default=5,
 )
 
 parser.add_argument(
     "-max_k",
-    help="Maximum k value to test with PORT-EK find_k. PORT-EK will test all odd k values from min_k up to and including max_k.",
+    help="Maximum k value to test with PORT-EK find_k. PORT-EK will test all odd k values from min_k up to and including max_k. Default 31.",
     type=int,
     default=31,
 )
@@ -38,15 +38,18 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "-d", help="Maximum edit distance when mapping k-mers to reference sequence. Default 2.", type=int, default=2,
+)
+parser.add_argument(
     "-verbose",
-    help="Recieve additional output from some PORT-EK tools",
+    help="Recieve additional information from some PORT-EK tools. Default False.",
     default=False,
     action="store_true",
 )
 
 parser.add_argument(
     "-n_jobs",
-    help="Number of processes used in PORT-EK find and PORT-EK enriched (default 4)",
+    help="Number of processes used in PORT-EK find and PORT-EK enriched. Default 4.",
     default=4,
     type=int,
 )
@@ -112,8 +115,8 @@ def main():
 
     elif args.tool == "map":
         start_time = datetime.now()
-        ref_indexer = portek.RefSeqIndexer(args.project_dir, args.k)
-        ref_indexer.index_ref_seq(2,args.verbose)
+        mapping_pipeline = portek.MappingPipeline(args.project_dir, args.k)
+        mapping_pipeline.index_ref_seq(args.d,args.verbose)
         end_timeS_ARE_NOT_CANON = datetime.now()
         running_time = end_timeS_ARE_NOT_CANON - start_time
         print(f"\nTotal running time: {running_time}")
