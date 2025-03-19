@@ -213,7 +213,7 @@ def check_exclusivity(row: pd.Series, avg_cols: list) -> str:
     else:
         return "non-exclusive"
 
-
+#deprecated
 def save_kmers_fasta(kmers:list, ids:list | None, name:str, directory:str, k:int) -> None:
     out_fasta_list = []
     for i,kmer in enumerate(kmers):
