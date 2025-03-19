@@ -400,12 +400,13 @@ class EnrichedKmersPipeline(BasePipeline):
 
     def save_matrix(self, matrix_type: str, full: bool = False):
         print(f"\nSaving {matrix_type} {self.k}-mers matrix.")
-        self.matrices[matrix_type].index = self.matrices[matrix_type].index.map(
+        df_to_save = self.matrices[matrix_type].copy()
+        df_to_save.index = df_to_save.index.map(
             lambda id: portek.decode_kmer(id, self.k)
         )
         if full == True:
             out_filename = f"{self.project_dir}/output/{matrix_type}_{self.k}mers.csv"
-            self.matrices[matrix_type].to_csv(out_filename, index_label="kmer")
+            df_to_save.to_csv(out_filename, index_label="kmer")
         else:
             out_filename = (
                 f"{self.project_dir}/output/{matrix_type}_{self.k}mers_stats.csv"
@@ -415,24 +416,12 @@ class EnrichedKmersPipeline(BasePipeline):
                 + list(itertools.chain(*zip(self.err_cols, self.p_cols)))
                 + ["RMSE", "group", "exclusivity"]
             )
-            self.matrices[matrix_type].loc[:, export_cols].to_csv(
+            df_to_save.loc[:, export_cols].to_csv(
                 out_filename, index_label="kmer"
             )
 
-    def save_kmers_as_reads(self):
-        for group in self.sample_groups:
-            ids = []
-            kmers = []
-            for kmer in self.matrices["enriched"].index:
-                count = int(
-                    round(
-                        self.matrices["enriched"].loc[kmer, f"{group}_avg"]
-                        * len(self.sample_group_dict[group])
-                    )
-                )
-                kmers.extend([kmer] * count)
-                for i in range(count):
-                    ids.append(f"{kmer}{i}")
-            portek.save_kmers_fasta(
-                kmers=kmers, ids=ids, name=group, directory=self.project_dir, k=self.k
-            )
+    def save_enriched_kmers(self):
+        kmers_to_save = self.matrices["enriched"].index.to_list()
+        with open(f"{self.project_dir}/temp/enriched_kmers.pkl", mode="wb") as out_file:
+            pickle.dump(kmers_to_save, out_file)
+   

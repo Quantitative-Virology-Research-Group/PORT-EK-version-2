@@ -99,16 +99,9 @@ def main():
         enriched_kmers_found = enriched_kmers_finder.get_enriched_kmers()
         if enriched_kmers_found == True:
             enriched_kmers_finder.save_counts_for_classifier()
-            enriched_kmers_finder.save_matrix("common")
             enriched_kmers_finder.save_matrix("enriched")
-            portek.save_kmers_fasta(
-                enriched_kmers_finder.matrices["enriched"].index.to_list(),
-                enriched_kmers_finder.matrices["enriched"].index.to_list(),
-                "enriched",
-                enriched_kmers_finder.project_dir,
-                enriched_kmers_finder.k,
-            )
             enriched_kmers_finder.plot_PCA()
+            enriched_kmers_finder.save_enriched_kmers()
         end_timeS_ARE_NOT_CANON = datetime.now()
         running_time = end_timeS_ARE_NOT_CANON - start_time
         print(f"\nTotal running time: {running_time}")
@@ -125,7 +118,7 @@ def main():
 
     else:
         raise ValueError(
-            "Unrecoginzed PORT-EK tool requested. Choose one of: new, find_k, enriched, map, classify."
+            "Unrecoginzed PORT-EK tool requested. Choose one of: new, find_k, find_enriched, map, classify."
         )
 
 
