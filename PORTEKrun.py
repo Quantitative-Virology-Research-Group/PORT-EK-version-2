@@ -101,7 +101,7 @@ def main():
             enriched_kmers_finder.save_counts_for_classifier()
             enriched_kmers_finder.save_matrix("enriched")
             enriched_kmers_finder.plot_PCA()
-            enriched_kmers_finder.save_enriched_kmers()
+            # enriched_kmers_finder.save_enriched_kmers()
         end_timeS_ARE_NOT_CANON = datetime.now()
         running_time = end_timeS_ARE_NOT_CANON - start_time
         print(f"\nTotal running time: {running_time}")
@@ -110,6 +110,7 @@ def main():
         start_time = datetime.now()
         mapping_pipeline = portek.MappingPipeline(args.project_dir, args.k)
         mapping_pipeline.index_ref_seq(args.d,args.verbose)
+        mapping_pipeline.run_mapping(args.d,args.verbose)
         end_timeS_ARE_NOT_CANON = datetime.now()
         running_time = end_timeS_ARE_NOT_CANON - start_time
         print(f"\nTotal running time: {running_time}")

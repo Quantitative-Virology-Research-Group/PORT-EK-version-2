@@ -420,8 +420,8 @@ class EnrichedKmersPipeline(BasePipeline):
                 out_filename, index_label="kmer"
             )
 
-    def save_enriched_kmers(self):
-        kmers_to_save = self.matrices["enriched"].index.to_list()
-        with open(f"{self.project_dir}/temp/enriched_kmers.pkl", mode="wb") as out_file:
-            pickle.dump(kmers_to_save, out_file)
+    # def save_enriched_kmers(self):
+    #     kmers_to_save = self.matrices["enriched"].index.to_list()
+    #     with open(f"{self.project_dir}/temp/enriched_{self.k}mers.pkl", mode="wb") as out_file:
+    #         pickle.dump(kmers_to_save, out_file)
    

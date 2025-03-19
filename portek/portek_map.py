@@ -24,13 +24,15 @@ from scipy.stats import linregress
 
 import portek
 from portek.portek_utils import BasePipeline
-  
-  
+
+
 class MappingPipeline(BasePipeline):
 
-    def __init__(self, project_dir: str, k:int):
+    def __init__(self, project_dir: str, k: int):
         super().__init__(project_dir, k)
+        self.kmer_index = None
         self.matrices = {}
+
         try:
             self.matrices["enriched"] = pd.read_csv(
                 f"{project_dir}/output/enriched_{self.k}mers_stats.csv", index_col=0
@@ -39,16 +41,20 @@ class MappingPipeline(BasePipeline):
             raise FileNotFoundError(
                 f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK find_enriched first!"
             )
-        
-    def _check_index(self, dist: int) -> bool:
-        return pathlib.Path(f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl").exists()
 
-    def index_ref_seq(self,dist:int, verbose:bool = False) -> None:
+    def _check_index(self, dist: int) -> bool:
+        return pathlib.Path(
+            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl"
+        ).exists()
+
+    def index_ref_seq(self, dist: int, verbose: bool = False) -> None:
         if self._check_index(dist) == False:
             if verbose == True:
-                print(f"No {self.k}-mer index with maximum distance {dist} exists for {self.ref_seq_name}, building index.")
+                print(
+                    f"No {self.k}-mer index with maximum distance {dist} exists for {self.ref_seq_name}, building index."
+                )
             bit_ref_seq = portek.encode_seq(self.ref_seq)
-            kmer_index = {dist:{} for dist in range(dist+1)}
+            kmer_index = {dist: {} for dist in range(dist + 1)}
             for i in range(0, len(bit_ref_seq) - self.k + 1):
                 bit_kmer = bit_ref_seq[i : i + self.k]
                 if "X" not in bit_kmer:
@@ -58,32 +64,66 @@ class MappingPipeline(BasePipeline):
                     else:
                         kmer_index[0][int_kmer0] = [i + 1]
 
-                    for d in range(1,dist+1):
-                        all_bit_kmers_del_d = set(itertools.combinations(bit_kmer,len(bit_kmer)-d))
-                        all_int_kmers_del_d = [int("".join(bit_kmer_del_d), base=2) for bit_kmer_del_d in all_bit_kmers_del_d]
+                    for d in range(1, dist + 1):
+                        all_bit_kmers_del_d = set(
+                            itertools.combinations(bit_kmer, len(bit_kmer) - d)
+                        )
+                        all_int_kmers_del_d = [
+                            int("".join(bit_kmer_del_d), base=2)
+                            for bit_kmer_del_d in all_bit_kmers_del_d
+                        ]
                         for int_kmer_del_d in all_int_kmers_del_d:
                             if int_kmer_del_d in kmer_index[d].keys():
                                 kmer_index[d][int_kmer_del_d].append(i + 1)
                             else:
-                                kmer_index[d][int_kmer_del_d] = [i+1]
+                                kmer_index[d][int_kmer_del_d] = [i + 1]
 
-            with open(f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl", mode="wb") as out_file:
+            with open(
+                f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl",
+                mode="wb",
+            ) as out_file:
                 pickle.dump(kmer_index, out_file)
             if verbose == True:
-                print(f"Finished building {self.k}-mer index with maximum distance {dist} exists for {self.ref_seq_name}")
-                for d in range(dist+1):
-                    print(f"Extracted {len(kmer_index[d])} k-mers with distance {d}.")           
-            self.kmer_index = kmer_index    
+                print(
+                    f"Finished building {self.k}-mer index with maximum distance {dist} exists for {self.ref_seq_name}"
+                )
+                for d in range(dist + 1):
+                    print(f"Extracted {len(kmer_index[d])} k-mers with distance {d}.")
+            self.kmer_index = kmer_index
         else:
             if verbose == True:
-                print(f"{self.k}-mer index with maximum distance {dist} for {self.ref_seq_name} already exists.")
-            with open(f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl", mode="rb") as in_file:
+                print(
+                    f"{self.k}-mer index with maximum distance {dist} for {self.ref_seq_name} already exists."
+                )
+            with open(
+                f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl",
+                mode="rb",
+            ) as in_file:
                 kmer_index = pickle.load(in_file)
-            self.kmer_index = kmer_index 
+            self.kmer_index = kmer_index
 
-    def run_mapping(self, verbose: bool = False):
-        pass
-
+    def run_mapping(self, dist: int, verbose: bool = False) -> dict:
+        mapping_dict = {kmer:{} for kmer in self.matrices["enriched"].index}
+        unmapped_counter = {d:0 for d in range(dist+1)}
+        for kmer in mapping_dict.keys():
+            for d in range(dist+1):
+                mapping_dict[kmer][d]=[]
+                bit_kmer = portek.encode_seq(kmer)
+                bit_kmers_to_check = set(
+                            itertools.combinations(bit_kmer, len(bit_kmer) - d)
+                        )
+                int_kmers_to_check = [
+                            int("".join(bit_kmer_del_d), base=2)
+                            for bit_kmer_del_d in bit_kmers_to_check
+                        ]
+                for int_kmer in int_kmers_to_check:
+                    mapping_dict[kmer][d].extend(self.kmer_index[d].get(int_kmer,[]))
+                if len(mapping_dict[kmer][d]) == 0:
+                    unmapped_counter[d] += 1
+        print(len(mapping_dict.keys()))
+        print(unmapped_counter)
+        return mapping_dict
+    
     def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
         ref_start = map_pos
         aln_len = len(cigar)
@@ -187,7 +227,7 @@ class MappingPipeline(BasePipeline):
         if verbose == True:
             print(f"Done loading k-mer positions from file {input_filename.stem}.")
         return group, distro
-    
+
     def _get_group_distros(self, pos_results: list) -> dict:
         kmer_distros = {}
         if self.mode == "ava":
@@ -200,9 +240,11 @@ class MappingPipeline(BasePipeline):
                     kmer_distros[result[0]] = result[1]
                 else:
                     kmer_distros["control_enriched"] = {
-                        kmer: kmer_distros["control_enriched"].get(kmer, []) + result[1].get(kmer, [])
+                        kmer: kmer_distros["control_enriched"].get(kmer, [])
+                        + result[1].get(kmer, [])
                         for kmer in set(
-                            list(kmer_distros["control_enriched"].keys()) + list(result[1].keys())
+                            list(kmer_distros["control_enriched"].keys())
+                            + list(result[1].keys())
                         )
                     }
         return kmer_distros
