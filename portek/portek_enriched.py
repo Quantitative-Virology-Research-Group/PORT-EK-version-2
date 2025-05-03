@@ -123,25 +123,29 @@ class EnrichedKmersPipeline(BasePipeline):
     def _compare_group_pair(
         self, matrix_type: str, group1: str, group2: str, verbose: bool = False
     ) -> tuple[str, str, pd.Series, pd.Series, pd.Series]:
-        if verbose == True:
-            print(f"Calculating differences for groups {group1} and {group2}.")
-        avg_counts_i = self.matrices[matrix_type][f"{group1}_avg"]
-        avg_counts_j = self.matrices[matrix_type][f"{group2}_avg"]
-        errors = avg_counts_i - avg_counts_j
-        group1_samples = self.sample_group_dict[group1]
-        group2_samples = self.sample_group_dict[group2]
-        p_values = self.matrices[matrix_type].apply(
-            lambda row: stats.mannwhitneyu(
-                row[group1_samples], row[group2_samples]
-            ).pvalue,
-            axis=1,
-        )
-        with np.errstate(divide="ignore"):
-            log_p_values = -np.log10(p_values)
-        if verbose == True:
-            print(f"Done calculating differences for groups {group1} and {group2}.")
-        return group1, group2, errors, p_values, log_p_values
-
+        try:
+            if verbose == True:
+                print(f"Calculating differences for groups {group1} and {group2}.")
+            avg_counts_i = self.matrices[matrix_type][f"{group1}_avg"]
+            avg_counts_j = self.matrices[matrix_type][f"{group2}_avg"]
+            errors = avg_counts_i - avg_counts_j
+            group1_samples = self.sample_group_dict[group1]
+            group2_samples = self.sample_group_dict[group2]
+            p_values = self.matrices[matrix_type].apply(
+                lambda row: stats.mannwhitneyu(
+                    row[group1_samples], row[group2_samples]
+                ).pvalue,
+                axis=1,
+            )
+            with np.errstate(divide="ignore"):
+                log_p_values = -np.log10(p_values)
+            if verbose == True:
+                print(f"Done calculating differences for groups {group1} and {group2}.")
+            return group1, group2, errors, p_values, log_p_values
+        except Exception as e:
+            raise RuntimeError(
+                f"Error comparing groups {group1} and {group2}: {e}"
+            ) from e
     def calc_kmer_stats(self, matrix_type: str, n_jobs: int = 4, verbose: bool = False):
         print(f"\nGetting {matrix_type} {self.k}-mer counts.")
         count_df = pd.DataFrame(
@@ -191,9 +195,13 @@ class EnrichedKmersPipeline(BasePipeline):
                     )
 
             with multiprocessing.get_context("forkserver").Pool(n_jobs) as pool:
-                results = pool.starmap(
-                    self._compare_group_pair, group_pairs, chunksize=1
-                )
+                try:
+                    results = pool.starmap(
+                        self._compare_group_pair, group_pairs, chunksize=1
+                    )
+                except Exception as e:
+                    print(f"An error occurred during multiprocessing: {e}")
+                    raise
 
             for result in results:
                 err_name = f"{result[0]}-{result[1]}_err"
@@ -237,9 +245,13 @@ class EnrichedKmersPipeline(BasePipeline):
                 )
 
             with multiprocessing.get_context("forkserver").Pool(n_jobs) as pool:
-                results = pool.starmap(
-                    self._compare_group_pair, group_pairs, chunksize=1
-                )
+                try:
+                    results = pool.starmap(
+                        self._compare_group_pair, group_pairs, chunksize=1
+                    )
+                except Exception as e:
+                    print(f"An error occurred during multiprocessing: {e}")
+                    raise
 
             for result in results:
                 err_name = f"{result[0]}-{result[1]}_err"
