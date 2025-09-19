@@ -42,88 +42,123 @@ class MappingPipeline(BasePipeline):
                 f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK find_enriched first!"
             )
 
-    def _check_index(self, dist: int) -> bool:
+    def index_ref_seq(self, max_del_distance: int, verbose: bool = False) -> None:
+        if self._check_index(max_del_distance) == False:
+            self._generate_and_write_index(max_del_distance, verbose)
+        else:
+            self._load_index(max_del_distance, verbose)
+
+    def _check_index(self, max_del_distance: int) -> bool:
         return pathlib.Path(
-            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl"
+            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_del_distance}.pkl"
         ).exists()
 
-    def index_ref_seq(self, dist: int, verbose: bool = False) -> None:
-        if self._check_index(dist) == False:
-            if verbose == True:
-                print(
-                    f"No {self.k}-mer index with maximum distance {dist} exists for {self.ref_seq_name}, building index."
-                )
-            bit_ref_seq = portek.encode_seq(self.ref_seq)
-            kmer_index = {dist: {} for dist in range(dist + 1)}
-            for i in range(0, len(bit_ref_seq) - self.k + 1):
-                bit_kmer = bit_ref_seq[i : i + self.k]
-                if "X" not in bit_kmer:
-                    int_kmer0 = int("".join(bit_kmer), base=2)
-                    if int_kmer0 in kmer_index[0].keys():
-                        kmer_index[0][int_kmer0].append(i + 1)
-                    else:
-                        kmer_index[0][int_kmer0] = [i + 1]
+    def _generate_and_write_index(self, max_del_distance, verbose):
+        if verbose == True:
+            print(
+                f"No {self.k}-mer index with maximum distance {max_del_distance} exists for {self.ref_seq_name}, building index."
+            )
+        bit_ref_seq = portek.encode_seq(self.ref_seq)
+        kmer_index = self._generate_index(max_del_distance, bit_ref_seq)
+        os.makedirs(f"{self.project_dir}/temp/ref_index", exist_ok=True)
+        with open(
+            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_del_distance}.pkl",
+            mode="wb",
+        ) as out_file:
+            pickle.dump(kmer_index, out_file)
 
-                    for d in range(1, dist + 1):
-                        all_bit_kmers_del_d = set(
-                            itertools.combinations(bit_kmer, len(bit_kmer) - d)
-                        )
-                        all_int_kmers_del_d = [
-                            int("".join(bit_kmer_del_d), base=2)
-                            for bit_kmer_del_d in all_bit_kmers_del_d
-                        ]
-                        for int_kmer_del_d in all_int_kmers_del_d:
-                            if int_kmer_del_d in kmer_index[d].keys():
-                                kmer_index[d][int_kmer_del_d].append(i + 1)
-                            else:
-                                kmer_index[d][int_kmer_del_d] = [i + 1]
+        if verbose == True:
+            print(
+                f"Finished building {self.k}-mer index with maximum distance {max_del_distance} exists for {self.ref_seq_name}"
+            )
+            for d in range(max_del_distance + 1):
+                print(f"Extracted {len(kmer_index[d])} k-mers with distance {d}.")
+        self.kmer_index = kmer_index
 
-            with open(
-                f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl",
-                mode="wb",
-            ) as out_file:
-                pickle.dump(kmer_index, out_file)
-            if verbose == True:
-                print(
-                    f"Finished building {self.k}-mer index with maximum distance {dist} exists for {self.ref_seq_name}"
-                )
-                for d in range(dist + 1):
-                    print(f"Extracted {len(kmer_index[d])} k-mers with distance {d}.")
-            self.kmer_index = kmer_index
-        else:
-            if verbose == True:
-                print(
-                    f"{self.k}-mer index with maximum distance {dist} for {self.ref_seq_name} already exists."
-                )
-            with open(
-                f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{dist}.pkl",
-                mode="rb",
-            ) as in_file:
-                kmer_index = pickle.load(in_file)
-            self.kmer_index = kmer_index
+    def _generate_index(self, max_del_distance: int, bit_ref_seq: list) -> dict:
+        kmer_index = {dist: {} for dist in range(max_del_distance + 1)}
+        for kmer_start_position in range(0, len(bit_ref_seq) - self.k + 1):
+            bit_kmer = bit_ref_seq[kmer_start_position : kmer_start_position + self.k]
+            if "X" not in bit_kmer:
+                int_kmer = int("".join(bit_kmer), base=2)
+                if int_kmer in kmer_index[0].keys():
+                    kmer_index[0][int_kmer].append(kmer_start_position + 1)
+                else:
+                    kmer_index[0][int_kmer] = [kmer_start_position + 1]
 
-    def run_mapping(self, dist: int, verbose: bool = False) -> dict:
-        mapping_dict = {kmer:{} for kmer in self.matrices["enriched"].index}
-        unmapped_counter = {d:0 for d in range(dist+1)}
-        for kmer in mapping_dict.keys():
-            for d in range(dist+1):
-                mapping_dict[kmer][d]=[]
-                bit_kmer = portek.encode_seq(kmer)
-                bit_kmers_to_check = set(
-                            itertools.combinations(bit_kmer, len(bit_kmer) - d)
-                        )
-                int_kmers_to_check = [
-                            int("".join(bit_kmer_del_d), base=2)
-                            for bit_kmer_del_d in bit_kmers_to_check
-                        ]
-                for int_kmer in int_kmers_to_check:
-                    mapping_dict[kmer][d].extend(self.kmer_index[d].get(int_kmer,[]))
-                if len(mapping_dict[kmer][d]) == 0:
-                    unmapped_counter[d] += 1
-        print(len(mapping_dict.keys()))
-        print(unmapped_counter)
-        return mapping_dict
-    
+                self._generate_deletion_index(
+                    max_del_distance, kmer_index, kmer_start_position, bit_kmer
+                )
+
+        return kmer_index
+
+    def _generate_deletion_index(
+        self,
+        max_del_distance: int,
+        kmer_index: dict,
+        kmer_start_position: int,
+        bit_kmer: list,
+    ) -> None:
+        for del_distance in range(1, max_del_distance + 1):
+            all_bit_kmers_with_dels = set(
+                itertools.combinations(bit_kmer, len(bit_kmer) - del_distance)
+            )
+            all_int_kmers_with_dels = [
+                int("".join(bit_kmer_with_del), base=2)
+                for bit_kmer_with_del in all_bit_kmers_with_dels
+            ]
+            for int_kmer_with_del in all_int_kmers_with_dels:
+                if int_kmer_with_del in kmer_index[del_distance].keys():
+                    kmer_index[del_distance][int_kmer_with_del].append(
+                        kmer_start_position + 1
+                    )
+                else:
+                    kmer_index[del_distance][int_kmer_with_del] = [
+                        kmer_start_position + 1
+                    ]
+
+    def _load_index(self, max_del_distance, verbose):
+        if verbose == True:
+            print(
+                f"{self.k}-mer index with maximum distance {max_del_distance} for {self.ref_seq_name} already exists."
+            )
+        with open(
+            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_del_distance}.pkl",
+            mode="rb",
+        ) as in_file:
+            kmer_index = pickle.load(in_file)
+        self.kmer_index = kmer_index
+
+    def run_mapping(self, max_del_distance: int, verbose: bool = False) -> None:
+        self.mapping_dict = {kmer: {} for kmer in self.matrices["enriched"].index}
+        self.unmapped_counter = {d: 0 for d in range(max_del_distance + 1)}
+        for kmer in self.mapping_dict.keys():
+            for del_distance in range(max_del_distance + 1):
+                self._map_kmer_to_index(kmer, del_distance)
+
+    def _map_kmer_to_index(self, kmer: str, del_distance: int) -> None:
+        self.mapping_dict[kmer][del_distance] = []
+        bit_kmer = portek.encode_seq(kmer)
+        bit_kmers_to_check = set(
+            itertools.combinations(bit_kmer, len(bit_kmer) - del_distance)
+        )
+        int_kmers_to_check = [
+            int("".join(bit_kmer_del_d), base=2)
+            for bit_kmer_del_d in bit_kmers_to_check
+        ]
+        kmers_to_check = [
+            portek.decode_kmer(kmer, self.k - del_distance)
+            for kmer in int_kmers_to_check
+        ]
+        print(kmers_to_check)
+        print(int_kmers_to_check)
+        for int_kmer in int_kmers_to_check:
+            self.mapping_dict[kmer][del_distance].extend(
+                self.kmer_index[del_distance].get(int_kmer, [])
+            )
+        if len(self.mapping_dict[kmer][del_distance]) == 0:
+            self.unmapped_counter[del_distance] += 1
+
     def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
         ref_start = map_pos
         aln_len = len(cigar)
