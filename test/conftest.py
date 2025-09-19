@@ -8,6 +8,7 @@ from portek.portek_utils import BasePipeline
 from portek.portek_map import MappingPipeline
 from portek.portek_enriched import EnrichedKmersPipeline
 
+
 @pytest.fixture
 def valid_config():
     return {
@@ -16,8 +17,9 @@ def valid_config():
         "header_format": ["gisaid", "ncbi"],
         "mode": "ovr",
         "goi": "group1",
-        "ref_seq": "ref_seq.fasta"
+        "ref_seq": "ref_seq.fasta",
     }
+
 
 @pytest.fixture
 def valid_config_no_header():
@@ -27,8 +29,9 @@ def valid_config_no_header():
         "header_format": [],
         "mode": "ovr",
         "goi": "group1",
-        "ref_seq": "ref_seq.fasta"
+        "ref_seq": "ref_seq.fasta",
     }
+
 
 @pytest.fixture
 def invalid_config_lenghts():
@@ -38,8 +41,9 @@ def invalid_config_lenghts():
         "header_format": ["format1"],
         "mode": "invalid_mode",
         "goi": "group1",
-        "ref_seq": "ref_seq.fasta"
+        "ref_seq": "ref_seq.fasta",
     }
+
 
 @pytest.fixture
 def invalid_config_headers_lengths():
@@ -49,8 +53,10 @@ def invalid_config_headers_lengths():
         "header_format": ["format1"],
         "mode": "invalid_mode",
         "goi": "group1",
-        "ref_seq": "ref_seq.fasta"
+        "ref_seq": "ref_seq.fasta",
     }
+
+
 @pytest.fixture
 def invalid_config_headers():
     return {
@@ -59,8 +65,9 @@ def invalid_config_headers():
         "header_format": ["unknown", "something"],
         "mode": "ovr",
         "goi": "group1",
-        "ref_seq": "ref_seq.fasta"
+        "ref_seq": "ref_seq.fasta",
     }
+
 
 @pytest.fixture
 def invalid_config_mode():
@@ -70,12 +77,14 @@ def invalid_config_mode():
         "header_format": ["unknown", "something"],
         "mode": "invalid_mode",
         "goi": "group1",
-        "ref_seq": "ref_seq.fasta"
+        "ref_seq": "ref_seq.fasta",
     }
+
 
 @pytest.fixture
 def test_project_dir(tmp_path):
     return tmp_path
+
 
 @pytest.fixture
 @patch("builtins.open", new_callable=mock_open)
@@ -83,9 +92,10 @@ def test_project_dir(tmp_path):
 @patch("Bio.SeqIO.read")
 def test_base_pipeline(mock_read, mock_load, mock_open, test_project_dir, valid_config):
     mock_load.return_value = valid_config
-    mock_read.return_value.seq = "ATGCATGC"
+    mock_read.return_value.seq = "AAAAATTTTTCCCCCGGGGG"
 
     return BasePipeline(str(test_project_dir))
+
 
 # @pytest.fixture
 # def mock_config_ava():
@@ -99,13 +109,203 @@ def test_base_pipeline(mock_read, mock_load, mock_open, test_project_dir, valid_
 
 
 @pytest.fixture
-def mock_enriched_csv():
+def mock_enriched_kmer_stats_csv():
     return pd.DataFrame(
         {
-            "group": ["group1", "group2", "group1", "group2"],
-            "kmer": ["AAAAA", "AAAAC", "AAAAG", "AAAAT"],
+            "group1_avg": [
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                0.0,
+                1.0,
+                0.0,
+                1.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+            ],
+            "group2_avg": [
+                1.0,
+                1.0,
+                1.0,
+                0.0,
+                1.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                1.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+            ],
+            "group1-group2_err": [
+                -1.0,
+                -1.0,
+                -1.0,
+                1.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                -1.0,
+                1.0,
+                -1.0,
+                1.0,
+                -1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            "group1-group2_p-value": [
+                0.001,
+                0.001,
+                0.001,
+                0.001,
+                1.0,
+                0.001,
+                1.0,
+                1.0,
+                1.0,
+                0.001,
+                0.001,
+                0.001,
+                0.001,
+                0.001,
+                0.001,
+                0.001,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+            ],
+            "RMSE": [
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            "group": [
+                "group2_enriched",
+                "group2_enriched",
+                "group2_enriched",
+                "group1_enriched",
+                "conserved",
+                "group1_enriched",
+                "conserved",
+                "conserved",
+                "conserved",
+                "group1_enriched",
+                "group1_enriched",
+                "group2_enriched",
+                "group1_enriched",
+                "group2_enriched",
+                "group1_enriched",
+                "group2_enriched",
+                "conserved",
+                "conserved",
+                "conserved",
+                "conserved",
+                "conserved",
+            ],
+            "exclusivty": [
+                "exclusive",
+                "exclusive",
+                "exclusive",
+                "exclusive",
+                "non-exclusive",
+                "exclusive",
+                "non-exclusive",
+                "non-exclusive",
+                "non-exclusive",
+                "exclusive",
+                "exclusive",
+                "exclusive",
+                "exclusive",
+                "exclusive",
+                "exclusive",
+                "exclusive",
+                "non-exclusive",
+                "non-exclusive",
+                "non-exclusive",
+                "non-exclusive",
+                "non-exclusive",
+            ],
         },
-        index=["AAAAA", "AAAAC", "AAAAG", "AAAAT"],
+        index=[
+            "AAAAA",
+            "AAAAT",
+            "AAATT",
+            "AACAA",
+            "AATTT",
+            "ACAAT",
+            "ATTTT",
+            "CCCCG",
+            "CCCCC",
+            "CCCGG",
+            "CCGGG",
+            "CCGGT",
+            "CGGGG",
+            "CGGTG",
+            "GGGGG",
+            "GGTGG",
+            "TCCCC",
+            "TTCCC",
+            "TTTCC",
+            "TTTTC",
+            "TTTTT",
+        ],
+        columns=[
+            "group1_avg",
+            "group2_avg",
+            "group1-group2_err",
+            "group1-group2_p-value",
+            "RMSE",
+            "group",
+            "exclusivity",
+        ],
     )
 
 
