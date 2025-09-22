@@ -58,7 +58,7 @@ class MappingPipeline(BasePipeline):
             print(
                 f"No {self.k}-mer index with maximum distance {max_del_distance} exists for {self.ref_seq_name}, building index."
             )
-        bit_ref_seq = portek.encode_seq(self.ref_seq)
+        bit_ref_seq = portek.encode_seq_as_bits(self.ref_seq)
         kmer_index = self._generate_index(max_del_distance, bit_ref_seq)
         os.makedirs(f"{self.project_dir}/temp/ref_index", exist_ok=True)
         with open(
@@ -78,19 +78,31 @@ class MappingPipeline(BasePipeline):
     def _generate_index(self, max_del_distance: int, bit_ref_seq: list) -> dict:
         kmer_index = {dist: {} for dist in range(max_del_distance + 1)}
         for kmer_start_position in range(0, len(bit_ref_seq) - self.k + 1):
-            bit_kmer = bit_ref_seq[kmer_start_position : kmer_start_position + self.k]
-            if "X" not in bit_kmer:
-                int_kmer = int("".join(bit_kmer), base=2)
-                if int_kmer in kmer_index[0].keys():
-                    kmer_index[0][int_kmer].append(kmer_start_position + 1)
-                else:
-                    kmer_index[0][int_kmer] = [kmer_start_position + 1]
+            bit_kmer = self._get_bit_kmer(bit_ref_seq, kmer_start_position)
+            if bit_kmer in kmer_index[0].keys():
+                kmer_index[0][bit_kmer].append(kmer_start_position + 1)
+            else:
+                kmer_index[0][bit_kmer] = [kmer_start_position + 1]
 
-                self._generate_deletion_index(
-                    max_del_distance, kmer_index, kmer_start_position, bit_kmer
-                )
+                # self._generate_deletion_index(
+                #     max_del_distance, kmer_index, kmer_start_position, bit_kmer
+                # )
 
         return kmer_index
+
+    def _get_bit_kmer(self, bit_ref_seq, kmer_start_position):
+        bit_kmer = int(
+            "".join(
+                [
+                    format(bit, "04b")
+                    for bit in bit_ref_seq[
+                        kmer_start_position : kmer_start_position + self.k
+                    ]
+                ]
+            ),
+            2,
+        )
+        return bit_kmer
 
     def _generate_deletion_index(
         self,
