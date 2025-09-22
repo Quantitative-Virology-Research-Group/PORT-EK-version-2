@@ -13,8 +13,9 @@ from scipy.spatial import distance
 from scipy.cluster import hierarchy
 from Bio import SeqIO, SeqRecord, Seq
 
+
 class BasePipeline:
-    def _load_and_check_config(self, project_dir:str) -> None:
+    def _load_and_check_config(self, project_dir: str) -> None:
         try:
             with open(f"{project_dir}/config.yaml", "r") as config_file:
                 config = yaml.safe_load(config_file)
@@ -22,15 +23,22 @@ class BasePipeline:
                 err_msg = "Number of sample groups and input fastas must match!"
                 raise ValueError()
             if len(config["header_format"]) == 0:
-                self.header_format = ["plain" for _ in range(len(config["sample_groups"]))]
+                self.header_format = [
+                    "plain" for _ in range(len(config["sample_groups"]))
+                ]
             else:
                 if len(config["header_format"]) != len(config["sample_groups"]):
                     err_msg = "Number of header formats must be 0 or match number of sample groups!"
                     raise ValueError()
-                if any([header != "gisaid" and header != "ncbi" and header != "plain" for header in config["header_format"]]):
+                if any(
+                    [
+                        header != "gisaid" and header != "ncbi" and header != "plain"
+                        for header in config["header_format"]
+                    ]
+                ):
                     err_msg = "Header format must be 'gisaid', 'ncbi' or 'plain'!"
                     raise ValueError()
-                self.header_format = config["header_format"] 
+                self.header_format = config["header_format"]
             self.sample_groups = config["sample_groups"]
             self.input_files = config["input_files"]
             self.mode = config["mode"]
@@ -52,7 +60,9 @@ class BasePipeline:
                     ).seq
                 )
             except ValueError:
-                err_msg = "Missing reference sequence file or the file has incorrect format!"
+                err_msg = (
+                    "Missing reference sequence file or the file has incorrect format!"
+                )
                 raise ValueError()
         except FileNotFoundError:
             raise FileNotFoundError(
@@ -62,8 +72,8 @@ class BasePipeline:
             raise ValueError(err_msg)
         except KeyError:
             raise KeyError("Config file is missing required fields!")
-        
-    def __init__(self, project_dir:str, k:int=5):
+
+    def __init__(self, project_dir: str, k: int = 5):
         if os.path.isdir(project_dir) == True:
             self.project_dir = project_dir
         else:
@@ -85,14 +95,14 @@ class BasePipeline:
         self.sample_group_dict = None
         self.ref_seq_name = None
         self.ref_seq = None
-    
+
         self._load_and_check_config(project_dir)
 
     def load_kmer_set(self, k) -> list:
         kmer_set = set()
-        kmer_set_in_path = list(pathlib.Path(f"{self.project_dir}/input/indices/").glob(
-            f"{k}mer_*_set.pkl"
-        ))
+        kmer_set_in_path = list(
+            pathlib.Path(f"{self.project_dir}/input/indices/").glob(f"{k}mer_*_set.pkl")
+        )
         if len(kmer_set_in_path) != len(self.sample_groups):
             raise FileNotFoundError(
                 f"Some or all {k}-mers are missing from the project directory! Please run PORTEK find_k!"
@@ -104,12 +114,12 @@ class BasePipeline:
         kmer_set = list(kmer_set)
         self.kmer_set = kmer_set
         return kmer_set
-    
+
     def load_sample_list(self) -> list:
         sample_list = []
-        sample_list_in_path = list(pathlib.Path(f"{self.project_dir}/input/indices").glob(
-            "*sample_list.pkl"
-        ))
+        sample_list_in_path = list(
+            pathlib.Path(f"{self.project_dir}/input/indices").glob("*sample_list.pkl")
+        )
         if len(sample_list_in_path) != len(self.sample_groups):
             raise FileNotFoundError(
                 "Some or all samples are missing from the project directory! Please run PORTEK find_k!"
@@ -131,28 +141,46 @@ class BasePipeline:
         self.sample_group_dict = sample_group_dict
         return sample_list
 
-    def check_min_max_k(self, mink:int, maxk:int) -> None:
+    def check_min_max_k(self, mink: int, maxk: int) -> None:
         if type(mink) != int or mink < 5 or mink % 2 == 0:
-            raise TypeError(
-                "Minimum k must by an odd integer not smaller than 5!"
-            )
+            raise TypeError("Minimum k must by an odd integer not smaller than 5!")
         else:
             self.mink = mink
         if type(maxk) != int or maxk < 5 or maxk % 2 == 0:
-            raise TypeError(
-                "Maximum k must by an odd integer not smaller than 5!"
-            )
+            raise TypeError("Maximum k must by an odd integer not smaller than 5!")
         else:
             self.maxk = maxk
         if self.maxk < self.mink:
             raise ValueError("Minimum k must be no greater than maximum k!")
-        
+
 
 def encode_seq(nuc_seq: str) -> list[str]:
-    nuc_seq_upper  = nuc_seq.upper()
-    encoding = {"A":"00","C":"01","G":"10","T":"11"}
-    bit_seq = [encoding.get(nuc,"X") for nuc in nuc_seq_upper]
+    nuc_seq_upper = nuc_seq.upper()
+    encoding = {"A": "00", "C": "01", "G": "10", "T": "11"}
+    bit_seq = [encoding.get(nuc, "X") for nuc in nuc_seq_upper]
     return bit_seq
+
+
+def encode_seq_as_bits(seq: str) -> list[int]:
+
+    encoding = {
+        "A": 0b0001,  # A = 1
+        "T": 0b0010,  # T = 2
+        "G": 0b0100,  # G = 4
+        "C": 0b1000,  # C = 8
+        "W": 0b0011,  # W = A | T = 3
+        "R": 0b0101,  # R = A | G = 5
+        "Y": 0b1010,  # Y = C | T = 10
+        "S": 0b1100,  # S = G | C = 12
+        "K": 0b0110,  # K = G | T = 6
+        "M": 0b1001,  # M = A | C = 9
+        "B": 0b1110,  # B = C | G | T = 14
+        "D": 0b0111,  # D = A | G | T = 7
+        "H": 0b1011,  # H = A | C | T = 11
+        "V": 0b1101,  # V = A | C | G = 13
+        "N": 0b1111,  # N = A | C | G | T = 15
+    }
+    return [encoding.get(nuc.upper(), 15) for nuc in seq]
 
 
 def encode_kmer(kmer_seq: str) -> int:
@@ -213,10 +241,13 @@ def check_exclusivity(row: pd.Series, avg_cols: list) -> str:
     else:
         return "non-exclusive"
 
-#deprecated
-def save_kmers_fasta(kmers:list, ids:list | None, name:str, directory:str, k:int) -> None:
+
+# deprecated
+def save_kmers_fasta(
+    kmers: list, ids: list | None, name: str, directory: str, k: int
+) -> None:
     out_fasta_list = []
-    for i,kmer in enumerate(kmers):
+    for i, kmer in enumerate(kmers):
         if ids == None:
             out_fasta_list.append(
                 SeqRecord.SeqRecord(
@@ -232,14 +263,15 @@ def save_kmers_fasta(kmers:list, ids:list | None, name:str, directory:str, k:int
                     id=ids[i],
                     description="",
                 )
-            )           
+            )
     SeqIO.write(
         out_fasta_list,
         f"{directory}/temp/{name}_{k}mers.fasta",
         format="fasta",
     )
 
-#not implemented
+
+# not implemented
 def assemble_kmers_debruijn(kmers: list) -> nx.MultiDiGraph:
     de_bruijn = nx.MultiDiGraph()
     for kmer in kmers:
@@ -250,7 +282,8 @@ def assemble_kmers_debruijn(kmers: list) -> nx.MultiDiGraph:
         de_bruijn.add_edge(kmerL, kmerR, sequence=kmer)
     return de_bruijn
 
-#not implemented
+
+# not implemented
 def assemble_contig(contig_graph: nx.MultiDiGraph) -> str:
     kmers = []
     if contig_graph.number_of_edges() == 1:
@@ -270,15 +303,20 @@ def assemble_contig(contig_graph: nx.MultiDiGraph) -> str:
             kmers.append(nx.get_edge_attributes(contig_graph, "sequence")[edge])
     return sequence, kmers
 
-#not implemented
-def cluster_kmers(matrix: pd.DataFrame, discard_singles:bool = False, max_d:float = 0):
+
+# not implemented
+def cluster_kmers(
+    matrix: pd.DataFrame, discard_singles: bool = False, max_d: float = 0
+):
     distances = distance.pdist(matrix)
     linkage = hierarchy.linkage(distances)
     clustering = hierarchy.fcluster(linkage, max_d, criterion="distance")
     clustering = pd.Series(clustering, index=matrix.index, name="freq_cluster")
     freq_clusters = {cluster_no: [] for cluster_no in clustering.unique()}
     for cluster_no in freq_clusters.keys():
-        freq_clusters[cluster_no] = clustering.loc[clustering == cluster_no].index.to_list()
+        freq_clusters[cluster_no] = clustering.loc[
+            clustering == cluster_no
+        ].index.to_list()
     cluster_graphs = {}
     for cluster, kmers in freq_clusters.items():
         cluster_graphs[cluster] = assemble_kmers_debruijn(kmers)
@@ -305,7 +343,8 @@ def cluster_kmers(matrix: pd.DataFrame, discard_singles:bool = False, max_d:floa
                 print(f"Ambiguous assembly in cluster {cluster}")
     return kmer_contig_dict, contigs_kmer_dict
 
-#not_implemented
+
+# not_implemented
 def make_ordinal(n):
     """
     Convert an integer into its ordinal representation::
@@ -322,7 +361,8 @@ def make_ordinal(n):
         suffix = ["th", "st", "nd", "rd", "th"][min(n % 10, 4)]
     return str(n) + suffix
 
-#deprecated
+
+# deprecated
 def assemble_kmers(
     kmer_list: list, how: str = "pos", kmer_df: pd.DataFrame = None
 ) -> nx.DiGraph:
@@ -355,7 +395,8 @@ def assemble_kmers(
     kmer_graph = nx.from_edgelist(edge_tuples, create_using=nx.DiGraph)
     return kmer_graph
 
-#not implemented
+
+# not implemented
 def plot_segments(segment_df, ref_seq, colormap=colormaps["coolwarm"]):
     plot_df = segment_df[["ref_start", "ref_end", "group"]].sort_values("ref_start")
     groups_values = ["ref"] + np.unique(plot_df["group"]).tolist()
@@ -388,7 +429,8 @@ def plot_segments(segment_df, ref_seq, colormap=colormaps["coolwarm"]):
     pyplot.legend(handles=legends).set_loc("right")
     pyplot.show()
 
-#not implemented
+
+# not implemented
 def _draw_genome_overlay_plot(
     segment_coords: list,
     segment_colors: list,
@@ -421,7 +463,8 @@ def _draw_genome_overlay_plot(
         pyplot.savefig(save_path, format=save_format, dpi=600, bbox_inches="tight")
     pyplot.show()
 
-#not implemented
+
+# not implemented
 def plot_kmers_by_genome(
     kmers_and_genomes: list,
     kmer_matrix: pd.DataFrame,
@@ -456,7 +499,8 @@ def plot_kmers_by_genome(
         segment_coords, segment_colors, ref_seq, title, colormap, save_path, save_format
     )
 
-#not implemented
+
+# not implemented
 def assign_gene_from_interval(ref_pos: list, gene_dict: dict) -> str:
     genes = []
     for start, end in ref_pos:
@@ -474,7 +518,8 @@ def assign_gene_from_interval(ref_pos: list, gene_dict: dict) -> str:
                 ):
                     genes.append(gene)
 
-#not implemented
+
+# not implemented
 def assign_gene_from_position(ref_pos: int, gene_dict: dict) -> str:
     genes = []
     for gene, gene_ranges in gene_dict.items():
@@ -483,14 +528,16 @@ def assign_gene_from_position(ref_pos: int, gene_dict: dict) -> str:
                 genes.append(gene)
     return ", ".join(genes)
 
-#deprecated
+
+# deprecated
 def calc_kmer_pvalue(kmer: str, first_group, sec_group, matrix: pd.DataFrame):
     first_obs = matrix.loc[kmer, first_group]
     sec_obs = matrix.loc[kmer, sec_group]
     test_result = stats.mannwhitneyu(first_obs, sec_obs)
     return test_result.pvalue
 
-#Deprecated
+
+# Deprecated
 def build_similarity_graph_two_list(
     name, query_list, target_list, mismatch_treshold: int
 ) -> nx.Graph:
@@ -519,7 +566,8 @@ def build_similarity_graph_two_list(
     silmilarity_graph = nx.Graph(similarity_edges)
     return name, silmilarity_graph
 
-#Deprecated
+
+# Deprecated
 def calc_agg_freq(kmer_list, sample_list, source_df):
     pos_samples = set()
     for sample in sample_list:
@@ -529,6 +577,7 @@ def calc_agg_freq(kmer_list, sample_list, source_df):
                 break
     agg_freq = len(pos_samples) / len(sample_list)
     return agg_freq
+
 
 # Deprecated
 def map_kmers_find_mutations(kmer, ref_seq_str, pos_matrix, n=2, l=1000, find_wt=False):
