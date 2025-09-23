@@ -64,13 +64,45 @@ class TestMappingPipelineIndexing:
         result_kmer = mapping_pipeline._get_bit_kmer(bit_ref_seq, n)
         assert result_kmer == bit_kmer
 
-    def test_map_kmer_to_index(
-        self, mapping_pipeline: MappingPipeline, test_project_dir
+    @pytest.mark.parametrize(
+        "del_distance,bit_kmer,expected_ambi_kmers",
+        [
+            (0, 0b00010001000100010001, {0b00010001000100010001}),
+            (
+                1,
+                0b00010001000100010001,
+                {
+                    0b11110001000100010001,
+                    0b00011111000100010001,
+                    0b00010001111100010001,
+                    0b00010001000111110001,
+                    0b00010001000100011111,
+                },
+            ),
+            (
+                2,
+                0b00010001000100010001,
+                {
+                    0b11111111000100010001,
+                    0b11110001111100010001,
+                    0b11110001000111110001,
+                    0b11110001000100011111,
+                    0b00011111111100010001,
+                    0b00011111000111110001,
+                    0b00011111000100011111,
+                    0b00010001111111110001,
+                    0b00010001111100011111,
+                    0b00010001000111111111,
+                },
+            ),
+        ],
+    )
+    def test_generate_ambi_kmers(
+        seldf,
+        mapping_pipeline: MappingPipeline,
+        del_distance,
+        bit_kmer,
+        expected_ambi_kmers,
     ):
-        max_del_distance = 2
-        mapping_pipeline.index_ref_seq(max_del_distance)
-        mapping_pipeline.mapping_dict = {"ACAAT": {}}
-        mapping_pipeline.unmapped_counter = {d: 0 for d in range(max_del_distance + 1)}
-        mapping_pipeline._map_kmer_to_index("ACAAT", 0)
-        mapping_pipeline._map_kmer_to_index("ACAAT", 1)
-        mapping_pipeline._map_kmer_to_index("ACAAT", 2)
+        result = mapping_pipeline._generate_ambi_kmers(del_distance, bit_kmer)
+        assert result == expected_ambi_kmers

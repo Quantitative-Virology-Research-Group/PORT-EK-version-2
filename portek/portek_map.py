@@ -75,20 +75,26 @@ class MappingPipeline(BasePipeline):
                 print(f"Extracted {len(kmer_index[d])} k-mers with distance {d}.")
         self.kmer_index = kmer_index
 
-    def _generate_index(self, max_del_distance: int, bit_ref_seq: list) -> dict:
-        kmer_index = {dist: {} for dist in range(max_del_distance + 1)}
+    def _generate_index(self, max_mismatches: int, bit_ref_seq: list) -> dict:
+        kmer_index = {dist: {} for dist in range(max_mismatches + 1)}
         for kmer_start_position in range(0, len(bit_ref_seq) - self.k + 1):
             bit_kmer = self._get_bit_kmer(bit_ref_seq, kmer_start_position)
-            if bit_kmer in kmer_index[0].keys():
-                kmer_index[0][bit_kmer].append(kmer_start_position + 1)
-            else:
-                kmer_index[0][bit_kmer] = [kmer_start_position + 1]
+            self._save_kmer_to_index(kmer_index, kmer_start_position, 0, bit_kmer)
 
-                # self._generate_deletion_index(
-                #     max_del_distance, kmer_index, kmer_start_position, bit_kmer
-                # )
+            for n_mismatches in range(1, max_mismatches + 1):
+                ambi_kmers = self._generate_ambi_kmers(n_mismatches, bit_kmer)
+                for ambi_kmer in ambi_kmers:
+                    self._save_kmer_to_index(
+                        kmer_index, kmer_start_position, n_mismatches, ambi_kmer
+                    )
 
         return kmer_index
+
+    def _save_kmer_to_index(self, kmer_index, kmer_start_position, n_mismatches, kmer):
+        if kmer in kmer_index[n_mismatches].keys():
+            kmer_index[n_mismatches][kmer].append(kmer_start_position + 1)
+        else:
+            kmer_index[n_mismatches][kmer] = [kmer_start_position + 1]
 
     def _get_bit_kmer(self, bit_ref_seq, kmer_start_position):
         bit_kmer = int(
@@ -104,30 +110,30 @@ class MappingPipeline(BasePipeline):
         )
         return bit_kmer
 
-    def _generate_deletion_index(
+    def _generate_ambi_kmers(
         self,
-        max_del_distance: int,
-        kmer_index: dict,
-        kmer_start_position: int,
-        bit_kmer: list,
-    ) -> None:
-        for del_distance in range(1, max_del_distance + 1):
-            all_bit_kmers_with_dels = set(
-                itertools.combinations(bit_kmer, len(bit_kmer) - del_distance)
-            )
-            all_int_kmers_with_dels = [
-                int("".join(bit_kmer_with_del), base=2)
-                for bit_kmer_with_del in all_bit_kmers_with_dels
-            ]
-            for int_kmer_with_del in all_int_kmers_with_dels:
-                if int_kmer_with_del in kmer_index[del_distance].keys():
-                    kmer_index[del_distance][int_kmer_with_del].append(
-                        kmer_start_position + 1
-                    )
-                else:
-                    kmer_index[del_distance][int_kmer_with_del] = [
-                        kmer_start_position + 1
-                    ]
+        n_mismatches: int,
+        bit_kmer: int,
+    ) -> set:
+
+        bit_kmer_str = format(bit_kmer, f"0{self.k * 4}b")
+        ambi_kmers_bit_reps = set()
+        position_combinations = list(
+            itertools.combinations(range(self.k), n_mismatches)
+        )
+        print(position_combinations)
+        for positions in position_combinations:
+            ambi_kmer_bit_rep = list(bit_kmer_str)
+            for pos in positions:
+                ambi_kmer_bit_rep[pos * 4 : (pos + 1) * 4] = ["1", "1", "1", "1"]
+            ambi_kmers_bit_reps.add("".join(ambi_kmer_bit_rep))
+
+        bit_ambi_kmers = {
+            int("".join(amib_kmer_bit_rep), base=2)
+            for amib_kmer_bit_rep in ambi_kmers_bit_reps
+        }
+
+        return bit_ambi_kmers
 
     def _load_index(self, max_del_distance, verbose):
         if verbose == True:
