@@ -30,7 +30,7 @@ class MappingPipeline(BasePipeline):
 
     def __init__(self, project_dir: str, k: int):
         super().__init__(project_dir, k)
-        self.kmer_index = None
+        self.kmer_index = {}
         self.matrices = {}
 
         try:
@@ -42,36 +42,36 @@ class MappingPipeline(BasePipeline):
                 f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK find_enriched first!"
             )
 
-    def index_ref_seq(self, max_del_distance: int, verbose: bool = False) -> None:
-        if self._check_index(max_del_distance) == False:
-            self._generate_and_write_index(max_del_distance, verbose)
+    def index_ref_seq(self, max_mismatches: int, verbose: bool = False) -> None:
+        if self._check_index(max_mismatches) == False:
+            self._generate_and_write_index(max_mismatches, verbose)
         else:
-            self._load_index(max_del_distance, verbose)
+            self._load_index(max_mismatches, verbose)
 
-    def _check_index(self, max_del_distance: int) -> bool:
+    def _check_index(self, max_mismatches: int) -> bool:
         return pathlib.Path(
-            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_del_distance}.pkl"
+            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_mismatches}.pkl"
         ).exists()
 
-    def _generate_and_write_index(self, max_del_distance, verbose):
+    def _generate_and_write_index(self, max_mismatches, verbose):
         if verbose == True:
             print(
-                f"No {self.k}-mer index with maximum distance {max_del_distance} exists for {self.ref_seq_name}, building index."
+                f"No {self.k}-mer index with maximum distance {max_mismatches} exists for {self.ref_seq_name}, building index."
             )
         bit_ref_seq = portek.encode_seq_as_bits(self.ref_seq)
-        kmer_index = self._generate_index(max_del_distance, bit_ref_seq)
+        kmer_index = self._generate_index(max_mismatches, bit_ref_seq)
         os.makedirs(f"{self.project_dir}/temp/ref_index", exist_ok=True)
         with open(
-            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_del_distance}.pkl",
+            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_mismatches}.pkl",
             mode="wb",
         ) as out_file:
             pickle.dump(kmer_index, out_file)
 
         if verbose == True:
             print(
-                f"Finished building {self.k}-mer index with maximum distance {max_del_distance} exists for {self.ref_seq_name}"
+                f"Finished building {self.k}-mer index with maximum distance {max_mismatches} exists for {self.ref_seq_name}"
             )
-            for d in range(max_del_distance + 1):
+            for d in range(max_mismatches + 1):
                 print(f"Extracted {len(kmer_index[d])} k-mers with distance {d}.")
         self.kmer_index = kmer_index
 
@@ -146,35 +146,32 @@ class MappingPipeline(BasePipeline):
             kmer_index = pickle.load(in_file)
         self.kmer_index = kmer_index
 
-    def run_mapping(self, max_del_distance: int, verbose: bool = False) -> None:
+    def run_mapping(self, max_n_mismatch: int, verbose: bool = False) -> None:
         self.mapping_dict = {kmer: {} for kmer in self.matrices["enriched"].index}
-        self.unmapped_counter = {d: 0 for d in range(max_del_distance + 1)}
+        self.unmapped_counter = {d: 0 for d in range(max_n_mismatch + 1)}
         for kmer in self.mapping_dict.keys():
-            for del_distance in range(max_del_distance + 1):
-                self._map_kmer_to_index(kmer, del_distance)
+            for n_mismatch in range(max_n_mismatch + 1):
+                self._map_kmer_to_index_by_ambi(kmer, n_mismatch)
 
-    def _map_kmer_to_index(self, kmer: str, del_distance: int) -> None:
-        self.mapping_dict[kmer][del_distance] = []
-        bit_kmer = portek.encode_seq(kmer)
-        bit_kmers_to_check = set(
-            itertools.combinations(bit_kmer, len(bit_kmer) - del_distance)
-        )
-        int_kmers_to_check = [
-            int("".join(bit_kmer_del_d), base=2)
-            for bit_kmer_del_d in bit_kmers_to_check
-        ]
-        kmers_to_check = [
-            portek.decode_kmer(kmer, self.k - del_distance)
-            for kmer in int_kmers_to_check
-        ]
-        print(kmers_to_check)
-        print(int_kmers_to_check)
-        for int_kmer in int_kmers_to_check:
-            self.mapping_dict[kmer][del_distance].extend(
-                self.kmer_index[del_distance].get(int_kmer, [])
-            )
-        if len(self.mapping_dict[kmer][del_distance]) == 0:
-            self.unmapped_counter[del_distance] += 1
+    def _map_kmer_to_index_by_ambi(self, kmer: str, n_mismatch: int) -> None:
+        self.mapping_dict[kmer][n_mismatch] = set()
+        bit_kmer = self._get_bit_kmer(portek.encode_seq_as_bits(kmer), 0)
+        ambi_kmers = self._generate_ambi_kmers(n_mismatch, bit_kmer)
+        for ambi_kmer in ambi_kmers:
+            if ambi_kmer in self.kmer_index[n_mismatch].keys():
+                self.mapping_dict[kmer][n_mismatch] = self.mapping_dict[kmer][
+                    n_mismatch
+                ].union(self.kmer_index[n_mismatch][ambi_kmer])
+
+    def _map_kmer_to_index_bitwise(self, kmer: str, n_mismatch: int) -> None:
+        self.mapping_dict[kmer][n_mismatch] = set()
+        bit_kmer = self._get_bit_kmer(portek.encode_seq_as_bits(kmer), 0)
+        for index_kmer in self.kmer_index[n_mismatch].keys():
+            and_result = bit_kmer & index_kmer
+            if and_result == bit_kmer:
+                self.mapping_dict[kmer][n_mismatch] = self.mapping_dict[kmer][
+                    n_mismatch
+                ].union(self.kmer_index[n_mismatch][index_kmer])
 
     def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
         ref_start = map_pos

@@ -178,3 +178,49 @@ class TestMappingPipelineIndexing:
         result_index = mapping_pipeline._generate_index(max_mismatches, bit_ref_seq)
         assert result_index[0] == expected_index[0]
         assert result_index.get(1, 0) == expected_index.get(1, 0)
+
+    def test_map_kmer_to_index_by_ambi(
+        self, mapping_pipeline: MappingPipeline, benchmark
+    ):
+        mapping_pipeline.index_ref_seq(2)
+        mapping_pipeline.mapping_dict = {
+            kmer: {} for kmer in mapping_pipeline.matrices["enriched"].index
+        }
+
+        def run_mapping():
+            mapping_pipeline._map_kmer_to_index_by_ambi("AAAAA", 0)
+            mapping_pipeline._map_kmer_to_index_by_ambi("AAAAT", 0)
+            mapping_pipeline._map_kmer_to_index_by_ambi("TTTTT", 0)
+            mapping_pipeline._map_kmer_to_index_by_ambi("AAAAA", 1)
+            mapping_pipeline._map_kmer_to_index_by_ambi("TTTCC", 2)
+
+        benchmark(run_mapping)
+
+        assert mapping_pipeline.mapping_dict["AAAAA"][0] == {1}
+        assert mapping_pipeline.mapping_dict["AAAAT"][0] == {2}
+        assert mapping_pipeline.mapping_dict["TTTTT"][0] == {6}
+        assert mapping_pipeline.mapping_dict["AAAAA"][1] == {1, 2}
+        assert mapping_pipeline.mapping_dict["TTTCC"][2] == {6, 7, 8, 9, 10}
+
+    def test_map_kmer_to_index_bitwise(
+        self, mapping_pipeline: MappingPipeline, benchmark
+    ):
+        mapping_pipeline.index_ref_seq(2)
+        mapping_pipeline.mapping_dict = {
+            kmer: {} for kmer in mapping_pipeline.matrices["enriched"].index
+        }
+
+        def run_mapping():
+            mapping_pipeline._map_kmer_to_index_bitwise("AAAAA", 0)
+            mapping_pipeline._map_kmer_to_index_bitwise("AAAAT", 0)
+            mapping_pipeline._map_kmer_to_index_bitwise("TTTTT", 0)
+            mapping_pipeline._map_kmer_to_index_bitwise("AAAAA", 1)
+            mapping_pipeline._map_kmer_to_index_bitwise("TTTCC", 2)
+
+        benchmark(run_mapping)
+
+        assert mapping_pipeline.mapping_dict["AAAAA"][0] == {1}
+        assert mapping_pipeline.mapping_dict["AAAAT"][0] == {2}
+        assert mapping_pipeline.mapping_dict["TTTTT"][0] == {6}
+        assert mapping_pipeline.mapping_dict["AAAAA"][1] == {1, 2}
+        assert mapping_pipeline.mapping_dict["TTTCC"][2] == {6, 7, 8, 9, 10}
