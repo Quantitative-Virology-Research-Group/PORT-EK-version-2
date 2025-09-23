@@ -146,7 +146,7 @@ class MappingPipeline(BasePipeline):
             kmer_index = pickle.load(in_file)
         self.kmer_index = kmer_index
 
-    def run_mapping(self, max_n_mismatch: int, verbose: bool = False) -> None:
+    def run_mapping_by_ambi(self, max_n_mismatch: int, verbose: bool = False) -> None:
         self.mapping_dict = {kmer: {} for kmer in self.matrices["enriched"].index}
         self.unmapped_counter = {d: 0 for d in range(max_n_mismatch + 1)}
         for kmer in self.mapping_dict.keys():
@@ -162,16 +162,6 @@ class MappingPipeline(BasePipeline):
                 self.mapping_dict[kmer][n_mismatch] = self.mapping_dict[kmer][
                     n_mismatch
                 ].union(self.kmer_index[n_mismatch][ambi_kmer])
-
-    def _map_kmer_to_index_bitwise(self, kmer: str, n_mismatch: int) -> None:
-        self.mapping_dict[kmer][n_mismatch] = set()
-        bit_kmer = self._get_bit_kmer(portek.encode_seq_as_bits(kmer), 0)
-        for index_kmer in self.kmer_index[n_mismatch].keys():
-            and_result = bit_kmer & index_kmer
-            if and_result == bit_kmer:
-                self.mapping_dict[kmer][n_mismatch] = self.mapping_dict[kmer][
-                    n_mismatch
-                ].union(self.kmer_index[n_mismatch][index_kmer])
 
     def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
         ref_start = map_pos
@@ -417,13 +407,11 @@ class MappingPipeline(BasePipeline):
             )
         return mappings_with_pred_df
 
-    def _format_mappings_df(self, mappings_df: pd.DataFrame) -> pd.DataFrame:
-        mappings_df.loc[mappings_df["flag"] == 4, "mutations"] = "-"
-        mappings_df.loc[mappings_df["flag"] == 4, "n_mismatch"] = self.k
-        formatted_df = mappings_df.drop(
-            ["flag", "CIGAR", "score", "mapping_ok", "n_peaks", "real_pos"], axis=1
-        ).sort_values("ref_pos")
-        return formatted_df
+    def _format_mappings_df(self, max_mismatches) -> pd.DataFrame:
+        columns = [str(col) for col in range(max_mismatches + 1)]
+        mappings_df = pd.DataFrame(self.mapping_dict, columns=columns)
+
+        return mappings_df
 
     def _count_mappings(self, mappings_df: pd.DataFrame):
         num_kmers = len(self.matrices["enriched"])
