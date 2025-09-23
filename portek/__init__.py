@@ -1,4 +1,5 @@
 from .portek_utils import encode_seq
+from .portek_utils import encode_seq_as_bits
 from .portek_utils import encode_kmer
 from .portek_utils import decode_kmer
 from .portek_utils import filter_kmers
