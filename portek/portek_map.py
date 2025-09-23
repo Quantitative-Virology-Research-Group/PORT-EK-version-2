@@ -121,7 +121,6 @@ class MappingPipeline(BasePipeline):
         position_combinations = list(
             itertools.combinations(range(self.k), n_mismatches)
         )
-        print(position_combinations)
         for positions in position_combinations:
             ambi_kmer_bit_rep = list(bit_kmer_str)
             for pos in positions:
