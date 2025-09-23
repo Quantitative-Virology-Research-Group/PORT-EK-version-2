@@ -57,6 +57,8 @@ class TestMappingPipelineIndexing:
             (11, 559236),
             (12, 559172),
             (13, 558148),
+            (14, 541764),
+            (15, 279620),
         ],
     )
     def test_get_bit_kmer(self, mapping_pipeline: MappingPipeline, n, bit_kmer):
@@ -98,7 +100,7 @@ class TestMappingPipelineIndexing:
         ],
     )
     def test_generate_ambi_kmers(
-        seldf,
+        self,
         mapping_pipeline: MappingPipeline,
         del_distance,
         bit_kmer,
@@ -106,3 +108,73 @@ class TestMappingPipelineIndexing:
     ):
         result = mapping_pipeline._generate_ambi_kmers(del_distance, bit_kmer)
         assert result == expected_ambi_kmers
+
+    @pytest.mark.parametrize(
+        "max_mismatches, expected_index",
+        [
+            (
+                0,
+                {
+                    0: {
+                        69905: [1],
+                        69906: [2],
+                        69922: [3],
+                        70178: [4],
+                        74274: [5],
+                        139810: [6],
+                    }
+                },
+            ),
+            (
+                1,
+                {
+                    0: {
+                        69905: [1],
+                        69906: [2],
+                        69922: [3],
+                        70178: [4],
+                        74274: [5],
+                        139810: [6],
+                    },
+                    1: {
+                        0b00010001000100011111: [1, 2],
+                        0b00010001000111110001: [1],
+                        0b00010001111100010001: [1],
+                        0b00011111000100010001: [1],
+                        0b11110001000100010001: [1],
+                        0b00010001000111110010: [2, 3],
+                        0b00010001111100010010: [2],
+                        0b00011111000100010010: [2],
+                        0b11110001000100010010: [2],
+                        0b00010001000100101111: [3],
+                        0b00010001111100100010: [3, 4],
+                        0b00011111000100100010: [3],
+                        0b11110001000100100010: [3],
+                        0b00010001001000101111: [4],
+                        0b00010001001011110010: [4],
+                        0b00011111001000100010: [4, 5],
+                        0b11110001001000100010: [4],
+                        0b00010010001000101111: [5],
+                        0b00010010001011110010: [5],
+                        0b00010010111100100010: [5],
+                        0b00011111001000100010: [4, 5],
+                        0b11110010001000100010: [5, 6],
+                        0b00100010001000101111: [6],
+                        0b00100010001011110010: [6],
+                        0b00100010111100100010: [6],
+                        0b00101111001000100010: [6],
+                    },
+                },
+            ),
+        ],
+    )
+    # AAAAATTTTTs
+    def test_generate_index(
+        self, mapping_pipeline: MappingPipeline, max_mismatches, expected_index
+    ):
+        bit_ref_seq = portek.encode_seq_as_bits(
+            "AAAAATTTTT"
+        )  # shorter ref_seq for smaller index
+        result_index = mapping_pipeline._generate_index(max_mismatches, bit_ref_seq)
+        assert result_index[0] == expected_index[0]
+        assert result_index.get(1, 0) == expected_index.get(1, 0)
