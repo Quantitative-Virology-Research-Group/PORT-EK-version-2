@@ -81,7 +81,11 @@ class MappingPipeline(BasePipeline):
             self._save_kmer_to_index(kmer_index, kmer_start_position, 0, kmer)
 
             for n_mismatches in range(1, max_mismatches + 1):
-                ambi_kmers = self._generate_ambi_kmers(n_mismatches, kmer)
+                sub_kmers = self._generate_sub_kmers(n_mismatches, kmer)
+                indel_kmers = self._generate_indel_kmers(
+                    n_mismatches, kmer, kmer_start_position, ref_seq
+                )
+                ambi_kmers = sub_kmers.union(indel_kmers)
                 for ambi_kmer in ambi_kmers:
                     self._save_kmer_to_index(
                         kmer_index, kmer_start_position, n_mismatches, ambi_kmer
@@ -95,13 +99,13 @@ class MappingPipeline(BasePipeline):
         else:
             kmer_index[n_mismatches][kmer] = [kmer_start_position + 1]
 
-    def _generate_ambi_kmers(
+    def _generate_sub_kmers(
         self,
         n_mismatches: int,
         kmer: str,
     ) -> set:
 
-        ambi_kmers = set()
+        sub_kmers = set()
         position_combinations = list(
             itertools.combinations(range(self.k), n_mismatches)
         )
@@ -109,9 +113,45 @@ class MappingPipeline(BasePipeline):
             ambi_kmer = [nuc for nuc in kmer]
             for pos in positions:
                 ambi_kmer[pos] = "N"
-            ambi_kmers.add("".join(ambi_kmer))
+            sub_kmers.add("".join(ambi_kmer))
 
-        return ambi_kmers
+        return sub_kmers
+
+    def _generate_indel_kmers(
+        self,
+        n_mismatches: int,
+        kmer: str,
+        kmer_start_position: int,
+        ref_seq: str,
+    ) -> set:
+
+        indel_kmers = set()
+        for position in range(1, self.k):
+            in_kmer = [nuc for nuc in kmer]
+            in_kmer.insert(position, "N" * n_mismatches)
+            indel_kmers.add("".join(in_kmer))
+
+            if position + n_mismatches >= self.k:
+                continue
+            if kmer_start_position + self.k + n_mismatches > len(ref_seq):
+                continue
+            del_kmer = [nuc for nuc in kmer]
+            del_kmer = (
+                del_kmer[:position]
+                + del_kmer[position + n_mismatches :]
+                + [
+                    nuc
+                    for nuc in ref_seq[
+                        kmer_start_position
+                        + self.k : kmer_start_position
+                        + self.k
+                        + n_mismatches
+                    ]
+                ]
+            )
+            indel_kmers.add("".join(del_kmer))
+
+        return indel_kmers
 
     def _load_index(self, max_del_distance, verbose):
         if verbose == True:
@@ -134,7 +174,7 @@ class MappingPipeline(BasePipeline):
 
     def _map_kmer_to_index(self, kmer: str, n_mismatch: int) -> None:
         self.mapping_dict[kmer][n_mismatch] = set()
-        ambi_kmers = self._generate_ambi_kmers(n_mismatch, kmer)
+        ambi_kmers = self._generate_sub_kmers(n_mismatch, kmer)
         for ambi_kmer in ambi_kmers:
             if ambi_kmer in self.kmer_index[n_mismatch].keys():
                 self.mapping_dict[kmer][n_mismatch] = self.mapping_dict[kmer][

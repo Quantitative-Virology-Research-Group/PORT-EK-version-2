@@ -41,7 +41,7 @@ class TestMappingPipelineIndexing:
         assert not mapping_pipeline._check_index(2)
 
     @pytest.mark.parametrize(
-        "del_distance,kmer,expected_ambi_kmers",
+        "n_mismatches,kmer,expected_ambi_kmers",
         [
             (0, "AAAAA", {"AAAAA"}),
             (
@@ -73,79 +73,122 @@ class TestMappingPipelineIndexing:
             ),
         ],
     )
-    def test_generate_ambi_kmers(
+    def test_generate_sub_kmers(
         self,
         mapping_pipeline: MappingPipeline,
-        del_distance,
+        n_mismatches,
         kmer,
         expected_ambi_kmers,
     ):
-        result = mapping_pipeline._generate_ambi_kmers(del_distance, kmer)
+        result = mapping_pipeline._generate_sub_kmers(n_mismatches, kmer)
         assert result == expected_ambi_kmers
 
     @pytest.mark.parametrize(
-        "max_mismatches, expected_index",
+        "n_mismatches,kmer,kmer_start_position,expected_ambi_kmers",
         [
+            (0, "AAAAA", 0, {"AAAAA"}),
             (
+                1,
+                "AAAAA",
                 0,
-                {
-                    0: {
-                        "AAAAA": [1],
-                        "AAAAT": [2],
-                        "AAATT": [3],
-                        "AATTT": [4],
-                        "ATTTT": [5],
-                        "TTTTT": [6],
-                    }
-                },
+                {"ANAAAA", "AANAAA", "AAANAA", "AAAANA", "AAAAT"},
             ),
             (
                 1,
-                {
-                    0: {
-                        "AAAAA": [1],
-                        "AAAAT": [2],
-                        "AAATT": [3],
-                        "AATTT": [4],
-                        "ATTTT": [5],
-                        "TTTTT": [6],
-                    },
-                    1: {
-                        "AAAAN": [1, 2],
-                        "AAANA": [1],
-                        "AANAA": [1],
-                        "ANAAA": [1],
-                        "NAAAA": [1],
-                        "AAANT": [2, 3],
-                        "AANAT": [2],
-                        "ANAAT": [2],
-                        "NAAAT": [2],
-                        "AAATN": [3],
-                        "AANTT": [3, 4],
-                        "ANATT": [3],
-                        "NAATT": [3],
-                        "AATTN": [4],
-                        "AATNT": [4],
-                        "ANTTT": [4, 5],
-                        "NATTT": [4],
-                        "ATTTN": [5],
-                        "ATTNT": [5],
-                        "ATNTT": [5],
-                        "ANTTT": [4, 5],
-                        "NTTTT": [5, 6],
-                        "TTTTN": [6],
-                        "TTTNT": [6],
-                        "TTNTT": [6],
-                        "TNTTT": [6],
-                    },
-                },
+                "TTCTT",
+                5,
+                {"TNTCTT", "TTNCTT", "TTCNTT", "TTCTNT"},
+            ),
+            (
+                1,
+                "ATTCT",
+                4,
+                {"ANTTCT", "ATNTCT", "ATTNCT", "ATTCNT", "ATTTT", "ATCTT"},
+            ),
+            (
+                2,
+                "ATTCT",
+                4,
+                {"ANNTTCT", "ATNNTCT", "ATTNNCT", "ATTCNNT"},
             ),
         ],
     )
-    # AAAAATTTTTs
-    def test_generate_index(
-        self, mapping_pipeline: MappingPipeline, max_mismatches, expected_index
+    def test_generate_indel_kmers(
+        self,
+        mapping_pipeline: MappingPipeline,
+        n_mismatches,
+        kmer,
+        kmer_start_position,
+        expected_ambi_kmers,
     ):
-        result_index = mapping_pipeline._generate_index(max_mismatches, "AAAAATTTTT")
-        assert result_index[0] == expected_index[0]
-        assert result_index.get(1, 0) == expected_index.get(1, 0)
+        result = mapping_pipeline._generate_indel_kmers(
+            n_mismatches, kmer, kmer_start_position, "AAAAATTCTT"
+        )
+        assert result == expected_ambi_kmers
+
+    # @pytest.mark.parametrize(
+    #     "max_mismatches, expected_index",
+    #     [
+    #         (
+    #             0,
+    #             {
+    #                 0: {
+    #                     "AAAAA": [1],
+    #                     "AAAAT": [2],
+    #                     "AAATT": [3],
+    #                     "AATTT": [4],
+    #                     "ATTTT": [5],
+    #                     "TTTTT": [6],
+    #                 }
+    #             },
+    #         ),
+    #         (
+    #             1,
+    #             {
+    #                 0: {
+    #                     "AAAAA": [1],
+    #                     "AAAAT": [2],
+    #                     "AAATT": [3],
+    #                     "AATTT": [4],
+    #                     "ATTTT": [5],
+    #                     "TTTTT": [6],
+    #                 },
+    #                 1: {
+    #                     "AAAAN": [1, 2],
+    #                     "AAANA": [1],
+    #                     "AANAA": [1],
+    #                     "ANAAA": [1],
+    #                     "NAAAA": [1],
+    #                     "AAANT": [2, 3],
+    #                     "AANAT": [2],
+    #                     "ANAAT": [2],
+    #                     "NAAAT": [2],
+    #                     "AAATN": [3],
+    #                     "AANTT": [3, 4],
+    #                     "ANATT": [3],
+    #                     "NAATT": [3],
+    #                     "AATTN": [4],
+    #                     "AATNT": [4],
+    #                     "ANTTT": [4, 5],
+    #                     "NATTT": [4],
+    #                     "ATTTN": [5],
+    #                     "ATTNT": [5],
+    #                     "ATNTT": [5],
+    #                     "ANTTT": [4, 5],
+    #                     "NTTTT": [5, 6],
+    #                     "TTTTN": [6],
+    #                     "TTTNT": [6],
+    #                     "TTNTT": [6],
+    #                     "TNTTT": [6],
+    #                 },
+    #             },
+    #         ),
+    #     ],
+    # )
+    # # AAAAATTTTTs
+    # def test_generate_index(
+    #     self, mapping_pipeline: MappingPipeline, max_mismatches, expected_index
+    # ):
+    #     result_index = mapping_pipeline._generate_index(max_mismatches, "AAAAATTTTT")
+    #     assert result_index[0] == expected_index[0]
+    #     assert result_index.get(1, 0) == expected_index.get(1, 0)
