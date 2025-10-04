@@ -42,8 +42,8 @@ class MappingPipeline(BasePipeline):
                 f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK find_enriched first!"
             )
         self.mapping_df = pd.DataFrame(
-            [["", 0]],
-            columns=["reference_sequence_position", "number_of_mismatches"],
+            [["", 0, ""]],
+            columns=["reference_sequence_position", "number_of_mismatches", "group"],
             index=self.matrices["enriched"].index,
         )
 
@@ -98,12 +98,6 @@ class MappingPipeline(BasePipeline):
 
         return kmer_index
 
-    def _save_kmer_to_index(self, kmer_index, kmer_start_position, n_mismatches, kmer):
-        if kmer in kmer_index[n_mismatches].keys():
-            kmer_index[n_mismatches][kmer].append(kmer_start_position + 1)
-        else:
-            kmer_index[n_mismatches][kmer] = [kmer_start_position + 1]
-
     def _generate_sub_kmers(
         self,
         n_mismatches: int,
@@ -126,16 +120,16 @@ class MappingPipeline(BasePipeline):
         self,
         n_mismatches: int,
         kmer: str,
-        kmer_start_position: int | None,
-        ref_seq: str | None,
+        kmer_start_position: int,
+        ref_seq: str,
         generate_deletions: bool = True,
     ) -> set:
 
         indel_kmers = set()
-        for position in range(1, self.k):
+        for position in range(1, self.k - n_mismatches):
             in_kmer = [nuc for nuc in kmer]
             in_kmer.insert(position, "N" * n_mismatches)
-            indel_kmers.add("".join(in_kmer))
+            indel_kmers.add("".join(in_kmer[:-n_mismatches]))
             if generate_deletions == True:
                 if position + n_mismatches >= self.k:
                     continue
@@ -158,6 +152,12 @@ class MappingPipeline(BasePipeline):
                 indel_kmers.add("".join(del_kmer))
 
         return indel_kmers
+
+    def _save_kmer_to_index(self, kmer_index, kmer_start_position, n_mismatches, kmer):
+        if kmer in kmer_index[n_mismatches].keys():
+            kmer_index[n_mismatches][kmer].append(kmer_start_position + 1)
+        else:
+            kmer_index[n_mismatches][kmer] = [kmer_start_position + 1]
 
     def _load_index(self, max_del_distance, verbose):
         if verbose == True:
@@ -184,13 +184,33 @@ class MappingPipeline(BasePipeline):
                     )
                     self.mapping_df.at[kmer, "number_of_mismatches"] = n_mismatch
                     break
+            self.mapping_df.at[kmer, "group"] = self.matrices["enriched"].at[
+                kmer, "group"
+            ]
+
+    def calculate_coverage(self) -> pd.DataFrame:
+        coverage_df = pd.DataFrame(
+            0,
+            index=range(1, len(self.ref_seq) + 1),
+            columns=self.mapping_df["group"].unique(),
+            dtype=int,
+        )
+        for _, row in self.mapping_df.iterrows():
+            if row["reference_sequence_position"] == "":
+                continue
+            positions = [
+                int(pos) for pos in row["reference_sequence_position"].split(",")
+            ]
+            for pos in positions:
+                coverage_df.at[pos, row["group"]] += 1
+        return coverage_df
 
     def _map_kmer_to_index(
         self, kmer: str, n_mismatches: int, mapping_dict: dict
     ) -> None:
         sub_kmers = self._generate_sub_kmers(n_mismatches, kmer)
         in_kmers = self._generate_indel_kmers(
-            n_mismatches, kmer, None, None, generate_deletions=False
+            n_mismatches, kmer, 0, "", generate_deletions=False
         )
         ambi_kmers = sub_kmers.union(in_kmers)
         for ambi_kmer in ambi_kmers:
