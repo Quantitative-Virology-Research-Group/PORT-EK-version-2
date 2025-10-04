@@ -41,6 +41,11 @@ class MappingPipeline(BasePipeline):
             raise FileNotFoundError(
                 f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK find_enriched first!"
             )
+        self.mapping_df = pd.DataFrame(
+            [["", 0]],
+            columns=["reference_sequence_position", "number_of_mismatches"],
+            index=self.matrices["enriched"].index,
+        )
 
     def index_ref_seq(self, max_mismatches: int, verbose: bool = False) -> None:
         if self._check_index(max_mismatches) == False:
@@ -121,8 +126,9 @@ class MappingPipeline(BasePipeline):
         self,
         n_mismatches: int,
         kmer: str,
-        kmer_start_position: int,
-        ref_seq: str,
+        kmer_start_position: int | None,
+        ref_seq: str | None,
+        generate_deletions: bool = True,
     ) -> set:
 
         indel_kmers = set()
@@ -130,26 +136,26 @@ class MappingPipeline(BasePipeline):
             in_kmer = [nuc for nuc in kmer]
             in_kmer.insert(position, "N" * n_mismatches)
             indel_kmers.add("".join(in_kmer))
-
-            if position + n_mismatches >= self.k:
-                continue
-            if kmer_start_position + self.k + n_mismatches > len(ref_seq):
-                continue
-            del_kmer = [nuc for nuc in kmer]
-            del_kmer = (
-                del_kmer[:position]
-                + del_kmer[position + n_mismatches :]
-                + [
-                    nuc
-                    for nuc in ref_seq[
-                        kmer_start_position
-                        + self.k : kmer_start_position
-                        + self.k
-                        + n_mismatches
+            if generate_deletions == True:
+                if position + n_mismatches >= self.k:
+                    continue
+                if kmer_start_position + self.k + n_mismatches > len(ref_seq):
+                    continue
+                del_kmer = [nuc for nuc in kmer]
+                del_kmer = (
+                    del_kmer[:position]
+                    + del_kmer[position + n_mismatches :]
+                    + [
+                        nuc
+                        for nuc in ref_seq[
+                            kmer_start_position
+                            + self.k : kmer_start_position
+                            + self.k
+                            + n_mismatches
+                        ]
                     ]
-                ]
-            )
-            indel_kmers.add("".join(del_kmer))
+                )
+                indel_kmers.add("".join(del_kmer))
 
         return indel_kmers
 
@@ -166,17 +172,34 @@ class MappingPipeline(BasePipeline):
         self.kmer_index = kmer_index
 
     def run_mapping(self, max_n_mismatch: int, verbose: bool = False) -> None:
-        self.mapping_dict = {kmer: {} for kmer in self.matrices["enriched"].index}
-        self.unmapped_counter = {d: 0 for d in range(max_n_mismatch + 1)}
-        for kmer in self.mapping_dict.keys():
-            for n_mismatch in range(max_n_mismatch + 1):
-                self._map_kmer_to_index(kmer, n_mismatch)
 
-    def _map_kmer_to_index(self, kmer: str, n_mismatch: int) -> None:
-        self.mapping_dict[kmer][n_mismatch] = set()
-        ambi_kmers = self._generate_sub_kmers(n_mismatch, kmer)
+        for kmer in self.mapping_df.index:
+            mapping_dict = {n: set() for n in range(max_n_mismatch + 1)}
+            for n_mismatch in range(max_n_mismatch + 1):
+                self._map_kmer_to_index(kmer, n_mismatch, mapping_dict)
+            for n_mismatch in range(max_n_mismatch + 1):
+                if len(mapping_dict[n_mismatch]) > 0:
+                    self.mapping_df.at[kmer, "reference_sequence_position"] = ",".join(
+                        [str(pos) for pos in sorted(mapping_dict[n_mismatch])]
+                    )
+                    self.mapping_df.at[kmer, "number_of_mismatches"] = n_mismatch
+                    break
+
+    def _map_kmer_to_index(
+        self, kmer: str, n_mismatches: int, mapping_dict: dict
+    ) -> None:
+        sub_kmers = self._generate_sub_kmers(n_mismatches, kmer)
+        in_kmers = self._generate_indel_kmers(
+            n_mismatches, kmer, None, None, generate_deletions=False
+        )
+        ambi_kmers = sub_kmers.union(in_kmers)
         for ambi_kmer in ambi_kmers:
-            if ambi_kmer in self.kmer_index[n_mismatch].keys():
-                self.mapping_dict[kmer][n_mismatch] = self.mapping_dict[kmer][
-                    n_mismatch
-                ].union(self.kmer_index[n_mismatch][ambi_kmer])
+            if ambi_kmer in self.kmer_index[n_mismatches].keys():
+                mapping_dict[n_mismatches] = mapping_dict[n_mismatches].union(
+                    self.kmer_index[n_mismatches][ambi_kmer]
+                )
+
+    def save_mapping(self, max_n_mismatch: int) -> None:
+        self.mapping_df.to_csv(
+            f"{self.project_dir}/output/mapping_{self.k}mers_max{max_n_mismatch}mismatches.csv"
+        )
