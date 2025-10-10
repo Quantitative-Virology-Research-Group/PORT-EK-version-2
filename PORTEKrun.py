@@ -38,7 +38,10 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "-d", help="Maximum edit distance when mapping k-mers to reference sequence. Default 2.", type=int, default=2,
+    "-d",
+    help="Maximum edit distance when mapping k-mers to reference sequence. Default 2.",
+    type=int,
+    default=2,
 )
 parser.add_argument(
     "-verbose",
@@ -94,7 +97,9 @@ def main():
         start_time = datetime.now()
         enriched_kmers_finder = portek.EnrichedKmersPipeline(args.project_dir, args.k)
         enriched_kmers_finder.get_basic_kmer_stats()
-        enriched_kmers_finder.calc_kmer_stats("common", n_jobs=args.n_jobs, verbose=args.verbose)
+        enriched_kmers_finder.calc_kmer_stats(
+            "common", n_jobs=args.n_jobs, verbose=args.verbose
+        )
         enriched_kmers_finder.plot_volcanos("common")
         enriched_kmers_found = enriched_kmers_finder.get_enriched_kmers()
         if enriched_kmers_found == True:
@@ -109,8 +114,7 @@ def main():
     elif args.tool == "map":
         start_time = datetime.now()
         mapping_pipeline = portek.MappingPipeline(args.project_dir, args.k)
-        mapping_pipeline.index_ref_seq(args.d,args.verbose)
-        mapping_pipeline.run_mapping(args.d,args.verbose)
+        mapping_pipeline.run_mapping(args.d, args.verbose)
         end_timeS_ARE_NOT_CANON = datetime.now()
         running_time = end_timeS_ARE_NOT_CANON - start_time
         print(f"\nTotal running time: {running_time}")

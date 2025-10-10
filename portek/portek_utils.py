@@ -64,6 +64,7 @@ class BasePipeline:
                     "Missing reference sequence file or the file has incorrect format!"
                 )
                 raise ValueError()
+            self.ref_genes = config["ref_genes"]
         except FileNotFoundError:
             raise FileNotFoundError(
                 f"No config.yaml file found in directory {project_dir}!"
@@ -95,6 +96,7 @@ class BasePipeline:
         self.sample_group_dict = None
         self.ref_seq_name = None
         self.ref_seq = None
+        self.ref_genes = {}
 
         self._load_and_check_config(project_dir)
 

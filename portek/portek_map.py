@@ -41,11 +41,33 @@ class MappingPipeline(BasePipeline):
             raise FileNotFoundError(
                 f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK find_enriched first!"
             )
+        self._initialize_mapping_dataframe()
+
+    def _initialize_mapping_dataframe(self):
         self.mapping_df = pd.DataFrame(
-            [["", 0, ""]],
-            columns=["reference_sequence_position", "number_of_mismatches", "group"],
+            [[[], "", 0, "", ""]],
+            columns=[
+                "reference_sequence_position",
+                "gene",
+                "number_of_mismatches",
+                "group",
+                "exclusivity",
+            ],
             index=self.matrices["enriched"].index,
         )
+
+    def run_mapping(self, max_n_mismatch: int, verbose: bool = False) -> None:
+
+        self.index_ref_seq(max_n_mismatch, verbose)
+
+        for kmer in self.mapping_df.index:
+            mapping_dict = self._map_kmer_to_index(kmer, max_n_mismatch)
+            self._add_kmer_to_mapping_df(max_n_mismatch, kmer, mapping_dict)
+            self._update_mapping_df_group(kmer)
+            if self.ref_genes:
+                self._update_mapping_df_genes(kmer)
+
+        self.save_mapping(max_n_mismatch)
 
     def index_ref_seq(self, max_mismatches: int, verbose: bool = False) -> None:
         if self._check_index(max_mismatches) == False:
@@ -171,22 +193,64 @@ class MappingPipeline(BasePipeline):
             kmer_index = pickle.load(in_file)
         self.kmer_index = kmer_index
 
-    def run_mapping(self, max_n_mismatch: int, verbose: bool = False) -> None:
-
-        for kmer in self.mapping_df.index:
-            mapping_dict = {n: set() for n in range(max_n_mismatch + 1)}
-            for n_mismatch in range(max_n_mismatch + 1):
-                self._map_kmer_to_index(kmer, n_mismatch, mapping_dict)
-            for n_mismatch in range(max_n_mismatch + 1):
-                if len(mapping_dict[n_mismatch]) > 0:
-                    self.mapping_df.at[kmer, "reference_sequence_position"] = ",".join(
-                        [str(pos) for pos in sorted(mapping_dict[n_mismatch])]
+    def _map_kmer_to_index(
+        self,
+        kmer: str,
+        max_n_mismatch: int,
+    ) -> dict:
+        mapping_dict = {n: set() for n in range(max_n_mismatch + 1)}
+        for n_mismatch in range(max_n_mismatch + 1):
+            sub_kmers = self._generate_sub_kmers(n_mismatch, kmer)
+            in_kmers = self._generate_indel_kmers(
+                n_mismatch, kmer, 0, "", generate_deletions=False
+            )
+            ambi_kmers = sub_kmers.union(in_kmers)
+            for ambi_kmer in ambi_kmers:
+                if ambi_kmer in self.kmer_index[n_mismatch].keys():
+                    mapping_dict[n_mismatch] = mapping_dict[n_mismatch].union(
+                        self.kmer_index[n_mismatch][ambi_kmer]
                     )
-                    self.mapping_df.at[kmer, "number_of_mismatches"] = n_mismatch
-                    break
-            self.mapping_df.at[kmer, "group"] = self.matrices["enriched"].at[
-                kmer, "group"
-            ]
+        return mapping_dict
+
+    def _add_kmer_to_mapping_df(
+        self, max_n_mismatch: int, kmer: str, mapping_dict: dict
+    ) -> None:
+        for n_mismatch in range(max_n_mismatch + 1):
+            if len(mapping_dict[n_mismatch]) > 0:
+                self.mapping_df.at[kmer, "reference_sequence_position"] = sorted(
+                    list(mapping_dict[n_mismatch])
+                )
+                self.mapping_df.at[kmer, "number_of_mismatches"] = n_mismatch
+                break
+
+    def _update_mapping_df_group(self, kmer: str) -> None:
+        self.mapping_df.loc[kmer, ["group", "exclusivity"]] = self.matrices[
+            "enriched"
+        ].loc[kmer, ["group", "exclusivity"]]
+
+    def _update_mapping_df_genes(self, kmer: str) -> None:
+        positions: list[int] = self.mapping_df.at[kmer, "reference_sequence_position"]  # type: ignore
+        genes = set()
+        if positions:
+            for pos in positions:
+                genes_at_pos = self._find_genes_for_position(pos)
+                if genes_at_pos:
+                    genes.update(genes_at_pos.split(","))
+
+        self.mapping_df.at[kmer, "gene"] = ", ".join(sorted(genes))
+
+    def _find_genes_for_position(self, position: int) -> str:
+        matching_genes = set()
+
+        for gene in self.ref_genes:
+            if isinstance(gene["start"], list):
+                for start, end in zip(gene["start"], gene["end"]):
+                    if start <= position <= end:
+                        matching_genes.add(gene["gene"])
+            elif gene["start"] <= position <= gene["end"]:
+                matching_genes.add(gene["gene"])
+
+        return ",".join(sorted(matching_genes)) if matching_genes else ""
 
     def calculate_coverage(self) -> pd.DataFrame:
         coverage_df = pd.DataFrame(
@@ -205,21 +269,11 @@ class MappingPipeline(BasePipeline):
                 coverage_df.at[pos, row["group"]] += 1
         return coverage_df
 
-    def _map_kmer_to_index(
-        self, kmer: str, n_mismatches: int, mapping_dict: dict
-    ) -> None:
-        sub_kmers = self._generate_sub_kmers(n_mismatches, kmer)
-        in_kmers = self._generate_indel_kmers(
-            n_mismatches, kmer, 0, "", generate_deletions=False
-        )
-        ambi_kmers = sub_kmers.union(in_kmers)
-        for ambi_kmer in ambi_kmers:
-            if ambi_kmer in self.kmer_index[n_mismatches].keys():
-                mapping_dict[n_mismatches] = mapping_dict[n_mismatches].union(
-                    self.kmer_index[n_mismatches][ambi_kmer]
-                )
-
     def save_mapping(self, max_n_mismatch: int) -> None:
+        self.mapping_df["reference_sequence_position"] = self.mapping_df[
+            "reference_sequence_position"
+        ].apply(lambda x: ", ".join(map(str, x)))
         self.mapping_df.to_csv(
-            f"{self.project_dir}/output/mapping_{self.k}mers_max{max_n_mismatch}mismatches.csv"
+            f"{self.project_dir}/output/mapping_{self.k}mers_max{max_n_mismatch}mismatches.tsv",
+            sep="\t",
         )
