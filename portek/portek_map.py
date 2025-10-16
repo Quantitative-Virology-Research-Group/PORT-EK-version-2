@@ -44,7 +44,7 @@ class MappingPipeline(BasePipeline):
         self._initialize_mapping_dataframe()
 
     def _initialize_mapping_dataframe(self):
-        self.mapping_df = pd.DataFrame(
+        self.matrices["mapping"] = pd.DataFrame(
             [[[], "", 0, "", ""]],
             columns=[
                 "reference_sequence_position",
@@ -57,15 +57,14 @@ class MappingPipeline(BasePipeline):
         )
 
     def run_mapping(self, max_n_mismatch: int, verbose: bool = False) -> None:
-
         self.index_ref_seq(max_n_mismatch, verbose)
 
-        for kmer in self.mapping_df.index:
-            mapping_dict = self._map_kmer_to_index(kmer, max_n_mismatch)
-            self._add_kmer_to_mapping_df(max_n_mismatch, kmer, mapping_dict)
-            self._update_mapping_df_group(kmer)
+        for kmer in self.matrices["mapping"].index:
+            mapping_dict = self.map_kmer_to_index(kmer, max_n_mismatch)
+            self.add_kmer_to_mapping_df(max_n_mismatch, kmer, mapping_dict)
+            self.update_mapping_df_group(kmer)
             if self.ref_genes:
-                self._update_mapping_df_genes(kmer)
+                self.update_mapping_df_genes(kmer)
 
         self.save_mapping(max_n_mismatch)
 
@@ -85,13 +84,8 @@ class MappingPipeline(BasePipeline):
             print(
                 f"No {self.k}-mer index with maximum distance {max_mismatches} exists for {self.ref_seq_name}, building index."
             )
-        kmer_index = self._generate_index(max_mismatches, self.ref_seq)
-        os.makedirs(f"{self.project_dir}/temp/ref_index", exist_ok=True)
-        with open(
-            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_mismatches}.pkl",
-            mode="wb",
-        ) as out_file:
-            pickle.dump(kmer_index, out_file)
+        kmer_index = self._generate_index(max_mismatches, self.ref_seq)  # type: ignore
+        self._write_index(max_mismatches, kmer_index)
 
         if verbose == True:
             print(
@@ -181,19 +175,27 @@ class MappingPipeline(BasePipeline):
         else:
             kmer_index[n_mismatches][kmer] = [kmer_start_position + 1]
 
-    def _load_index(self, max_del_distance, verbose):
+    def _write_index(self, max_mismatches, kmer_index):
+        os.makedirs(f"{self.project_dir}/temp/ref_index", exist_ok=True)
+        with open(
+            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_mismatches}.pkl",
+            mode="wb",
+        ) as out_file:
+            pickle.dump(kmer_index, out_file)
+
+    def _load_index(self, max_mismatches, verbose):
         if verbose == True:
             print(
-                f"{self.k}-mer index with maximum distance {max_del_distance} for {self.ref_seq_name} already exists."
+                f"{self.k}-mer index with maximum distance {max_mismatches} for {self.ref_seq_name} already exists, loading..."
             )
         with open(
-            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_del_distance}.pkl",
+            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_mismatches}.pkl",
             mode="rb",
         ) as in_file:
             kmer_index = pickle.load(in_file)
         self.kmer_index = kmer_index
 
-    def _map_kmer_to_index(
+    def map_kmer_to_index(
         self,
         kmer: str,
         max_n_mismatch: int,
@@ -212,24 +214,25 @@ class MappingPipeline(BasePipeline):
                     )
         return mapping_dict
 
-    def _add_kmer_to_mapping_df(
+    def add_kmer_to_mapping_df(
         self, max_n_mismatch: int, kmer: str, mapping_dict: dict
     ) -> None:
+
         for n_mismatch in range(max_n_mismatch + 1):
             if len(mapping_dict[n_mismatch]) > 0:
-                self.mapping_df.at[kmer, "reference_sequence_position"] = sorted(
-                    list(mapping_dict[n_mismatch])
+                self.matrices["mapping"].at[kmer, "reference_sequence_position"] = (
+                    sorted(list(mapping_dict[n_mismatch]))
                 )
-                self.mapping_df.at[kmer, "number_of_mismatches"] = n_mismatch
+                self.matrices["mapping"].at[kmer, "number_of_mismatches"] = n_mismatch
                 break
 
-    def _update_mapping_df_group(self, kmer: str) -> None:
-        self.mapping_df.loc[kmer, ["group", "exclusivity"]] = self.matrices[
+    def update_mapping_df_group(self, kmer: str) -> None:
+        self.matrices["mapping"].loc[kmer, ["group", "exclusivity"]] = self.matrices[
             "enriched"
         ].loc[kmer, ["group", "exclusivity"]]
 
-    def _update_mapping_df_genes(self, kmer: str) -> None:
-        positions: list[int] = self.mapping_df.at[kmer, "reference_sequence_position"]  # type: ignore
+    def update_mapping_df_genes(self, kmer: str) -> None:
+        positions: list[int] = self.matrices["mapping"].at[kmer, "reference_sequence_position"]  # type: ignore
         genes = set()
         if positions:
             for pos in positions:
@@ -237,7 +240,7 @@ class MappingPipeline(BasePipeline):
                 if genes_at_pos:
                     genes.update(genes_at_pos.split(","))
 
-        self.mapping_df.at[kmer, "gene"] = ", ".join(sorted(genes))
+        self.matrices["mapping"].at[kmer, "gene"] = ", ".join(sorted(genes))
 
     def _find_genes_for_position(self, position: int) -> str:
         matching_genes = set()
@@ -252,28 +255,11 @@ class MappingPipeline(BasePipeline):
 
         return ",".join(sorted(matching_genes)) if matching_genes else ""
 
-    def calculate_coverage(self) -> pd.DataFrame:
-        coverage_df = pd.DataFrame(
-            0,
-            index=range(1, len(self.ref_seq) + 1),
-            columns=self.mapping_df["group"].unique(),
-            dtype=int,
-        )
-        for _, row in self.mapping_df.iterrows():
-            if row["reference_sequence_position"] == "":
-                continue
-            positions = [
-                int(pos) for pos in row["reference_sequence_position"].split(",")
-            ]
-            for pos in positions:
-                coverage_df.at[pos, row["group"]] += 1
-        return coverage_df
-
     def save_mapping(self, max_n_mismatch: int) -> None:
-        self.mapping_df["reference_sequence_position"] = self.mapping_df[
-            "reference_sequence_position"
-        ].apply(lambda x: ", ".join(map(str, x)))
-        self.mapping_df.to_csv(
-            f"{self.project_dir}/output/mapping_{self.k}mers_max{max_n_mismatch}mismatches.tsv",
+        self.matrices["mapping"]["reference_sequence_position"] = self.matrices[
+            "mapping"
+        ]["reference_sequence_position"].apply(lambda x: ", ".join(map(str, x)))
+        self.matrices["mapping"].to_csv(
+            f"{self.project_dir}/output/mapping_{self.k}mers_max_{max_n_mismatch}_mismatches.tsv",
             sep="\t",
         )
