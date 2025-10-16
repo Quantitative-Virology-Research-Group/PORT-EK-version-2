@@ -18,6 +18,10 @@ def valid_config():
         "mode": "ovr",
         "goi": "group1",
         "ref_seq": "ref_seq.fasta",
+        "ref_genes": [
+            {"gene": "gene1", "start": 1, "end": 1},
+            {"gene": "gene2", "start": 2, "end": 2},
+        ],
     }
 
 
@@ -109,7 +113,7 @@ def test_base_pipeline(mock_read, mock_load, mock_open, test_project_dir, valid_
 
 
 @pytest.fixture
-def mock_enriched_kmer_stats_csv():
+def test_enriched_kmer_stats_csv():
     return pd.DataFrame(
         {
             "group1_avg": [
@@ -142,7 +146,7 @@ def mock_enriched_kmer_stats_csv():
                 "group1_enriched",
                 "conserved",
             ],
-            "exclusivty": [
+            "exclusivity": [
                 "exclusive",
                 "exclusive",
                 "non-exclusive",
