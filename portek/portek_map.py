@@ -24,6 +24,7 @@ class MappingPipeline(BasePipeline):
                 f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK find_enriched first!"
             )
         self._initialize_mapping_dataframe()
+        self._initialize_coverage_dataframe()
 
     def _initialize_mapping_dataframe(self):
         self.matrices["mapping"] = pd.DataFrame(
@@ -38,6 +39,14 @@ class MappingPipeline(BasePipeline):
             index=self.matrices["enriched"].index,
         )
 
+    def _initialize_coverage_dataframe(self):
+        self.matrices["coverage"] = pd.DataFrame(
+            0,
+            columns=[f"{group}_enriched" for group in self.sample_groups]
+            + ["conserved"],
+            index=pd.RangeIndex(start=1, stop=len(self.ref_seq) + 1, step=1),
+        )
+
     def run_mapping(self, max_n_mismatch: int, verbose: bool = False) -> None:
         self.index_ref_seq(max_n_mismatch, verbose)
 
@@ -48,7 +57,8 @@ class MappingPipeline(BasePipeline):
             if self.ref_genes:
                 self.update_mapping_df_genes(kmer)
 
-        self.save_mapping(max_n_mismatch)
+        self.fill_coverage_dataframe()
+        self.save_mapping_and_coverage(max_n_mismatch)
 
     def index_ref_seq(self, max_mismatches: int, verbose: bool = False) -> None:
         if self._check_index(max_mismatches) == False:
@@ -237,11 +247,28 @@ class MappingPipeline(BasePipeline):
 
         return ",".join(sorted(matching_genes)) if matching_genes else ""
 
-    def save_mapping(self, max_n_mismatch: int) -> None:
+    def fill_coverage_dataframe(self) -> None:
+        for kmer in self.matrices["enriched"].index:
+            start_positions: list[int] = self.matrices["mapping"].at[
+                kmer, "reference_sequence_position"
+            ]
+            group: str = self.matrices["enriched"].at[kmer, "group"]
+            if start_positions:
+                for start_position in start_positions:
+                    positions = [
+                        pos for pos in range(start_position, start_position + self.k)
+                    ]
+                    self.matrices["coverage"].loc[positions, group] += 1
+
+    def save_mapping_and_coverage(self, max_n_mismatch: int) -> None:
         self.matrices["mapping"]["reference_sequence_position"] = self.matrices[
             "mapping"
         ]["reference_sequence_position"].apply(lambda x: ", ".join(map(str, x)))
         self.matrices["mapping"].to_csv(
             f"{self.project_dir}/output/mapping_{self.k}mers_max_{max_n_mismatch}_mismatches.tsv",
+            sep="\t",
+        )
+        self.matrices["coverage"].to_csv(
+            f"{self.project_dir}/output/coverage_{self.k}mers_max_{max_n_mismatch}_mismatches.tsv",
             sep="\t",
         )

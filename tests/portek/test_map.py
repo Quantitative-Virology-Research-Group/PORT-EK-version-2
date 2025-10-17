@@ -57,6 +57,15 @@ class TestMappingPipelineInit:
         assert mapping_pipeline.matrices["mapping"].index.equals(
             mapping_pipeline.matrices["enriched"].index
         )
+        assert mapping_pipeline.matrices["coverage"].columns.tolist() == [
+            "group1_enriched",
+            "group2_enriched",
+            "conserved",
+        ]
+        assert mapping_pipeline.matrices["coverage"].index.equals(
+            pd.Index([1, 2, 3, 4, 5, 6, 7])
+        )
+        assert mapping_pipeline.matrices["coverage"].sum().sum() == 0
 
 
 class TestMappingPipelineIndexing:
@@ -320,6 +329,45 @@ class TestMappingPipelineIndexing:
 
 
 class TestMappingPipelineMapping:
+    @pytest.fixture(scope="class")
+    def expected_mapping_df(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "reference_sequence_position": ["1,2", "2", "3"],
+                "gene": ["gene1, gene2", "gene2", ""],
+                "number_of_mismatches": [1, 1, 0],
+                "group": [
+                    "group2_enriched",
+                    "group1_enriched",
+                    "conserved",
+                ],
+                "exclusivity": [
+                    "exclusive",
+                    "exclusive",
+                    "non-exclusive",
+                ],
+            },
+            index=["TTCGA", "TACGA", "CGAAA"],
+            columns=[
+                "reference_sequence_position",
+                "gene",
+                "number_of_mismatches",
+                "group",
+                "exclusivity",
+            ],
+        )
+
+    @pytest.fixture(scope="class")
+    def expected_coverage_df(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "group1_enriched": [0, 1, 1, 1, 1, 1, 0],
+                "group2_enriched": [1, 2, 2, 2, 2, 1, 0],
+                "conserved": [0, 0, 1, 1, 1, 1, 1],
+            },
+            index=[pos for pos in range(1, 8)],
+        )
+
     @pytest.mark.parametrize(
         "kmer,n_mismatches,expected_dict",
         [
@@ -338,22 +386,21 @@ class TestMappingPipelineMapping:
         assert mapping_dict == expected_dict
 
     @pytest.mark.parametrize(
-        "kmer,expected_pos,expected_mismatches",
+        "kmer,mapping_dict,expected_pos,expected_mismatches",
         [
-            ("TTCGA", [1, 2], 1),
-            ("TACGA", [2], 1),
-            ("CGAAA", [3], 0),
+            ("TTCGA", {0: set(), 1: {1, 2}}, [1, 2], 1),
+            ("TACGA", {0: set(), 1: {2}}, [2], 1),
+            ("CGAAA", {0: {3}}, [3], 0),
         ],
     )
     def test_add_kmer_to_mapping_df(
         self,
         mapping_pipeline: MappingPipeline,
         kmer,
+        mapping_dict,
         expected_pos,
         expected_mismatches,
     ):
-        mapping_pipeline._generate_and_write_index(1, verbose=False)
-        mapping_dict = mapping_pipeline.map_kmer_to_index(kmer, 1)
         mapping_pipeline.add_kmer_to_mapping_df(1, kmer, mapping_dict)
         result_row = mapping_pipeline.matrices["mapping"].loc[kmer]
         assert result_row["reference_sequence_position"] == expected_pos
@@ -384,7 +431,7 @@ class TestMappingPipelineMapping:
         [
             ("TTCGA", [1, 2], "gene1, gene2"),
             ("TACGA", [2], "gene2"),
-            ("CGAAA", [], ""),
+            ("CGAAA", [3], ""),
         ],
     )
     def test_update_mapping_df_gene(
@@ -402,19 +449,14 @@ class TestMappingPipelineMapping:
         result_row = mapping_pipeline.matrices["mapping"].loc[kmer]
         assert result_row["gene"] == expected_gene
 
-    def test_run_mapping(
-        self, mapping_pipeline: MappingPipeline, test_project_dir: Path
+    def test_fill_coverage_dataframe(
+        self,
+        mapping_pipeline: MappingPipeline,
+        expected_coverage_df: pd.DataFrame,
     ):
-        os.makedirs(test_project_dir / "output", exist_ok=True)
-        mapping_pipeline.run_mapping(1, verbose=False)
-        result_df = pd.read_csv(
-            f"{test_project_dir}/output/mapping_5mers_max_1_mismatches.tsv",
-            sep="\t",
-            index_col=0,
-        ).fillna("")
-        expected_df = pd.DataFrame(
+        mapping_pipeline.matrices["mapping"] = pd.DataFrame(
             {
-                "reference_sequence_position": ["1, 2", "2", "3"],
+                "reference_sequence_position": [[1, 2], [2], [3]],
                 "gene": ["gene1, gene2", "gene2", ""],
                 "number_of_mismatches": [1, 1, 0],
                 "group": [
@@ -437,4 +479,84 @@ class TestMappingPipelineMapping:
                 "exclusivity",
             ],
         )
-        pd.testing.assert_frame_equal(result_df, expected_df)
+        mapping_pipeline.fill_coverage_dataframe()
+
+        result_coverage = mapping_pipeline.matrices["coverage"]
+        pd.testing.assert_frame_equal(result_coverage, expected_coverage_df)
+
+    def test_save_mapping_and_coverage_many_digits(
+        self,
+        mapping_pipeline: MappingPipeline,
+        test_project_dir,
+    ):
+        mapping_pipeline.matrices["mapping"] = pd.DataFrame(
+            {
+                "reference_sequence_position": [[35, 154]],
+                "gene": [""],
+                "number_of_mismatches": [0],
+                "group": [
+                    "conserved",
+                ],
+                "exclusivity": [
+                    "non-exclusive",
+                ],
+            },
+            index=["CGAAA"],
+            columns=[
+                "reference_sequence_position",
+                "gene",
+                "number_of_mismatches",
+                "group",
+                "exclusivity",
+            ],
+        )
+        mapping_pipeline.matrices["coverage"] = pd.DataFrame(
+            {
+                "group1_enriched": [0, 1, 1, 1, 1, 1, 0],
+                "group2_enriched": [1, 2, 2, 2, 2, 1, 0],
+                "conserved": [0, 0, 1, 1, 1, 1, 1],
+            },
+            index=[pos for pos in range(1, 8)],
+        )
+        os.makedirs(test_project_dir / "output", exist_ok=True)
+        mapping_pipeline.save_mapping_and_coverage(1)
+
+        assert os.path.exists(
+            f"{test_project_dir}/output/mapping_5mers_max_1_mismatches.tsv"
+        )
+        assert os.path.exists(
+            f"{test_project_dir}/output/coverage_5mers_max_1_mismatches.tsv"
+        )
+        saved_mapping_df = pd.read_csv(
+            f"{test_project_dir}/output/mapping_5mers_max_1_mismatches.tsv",
+            sep="\t",
+            index_col=0,
+        ).fillna("")
+
+        assert saved_mapping_df.at["CGAAA", "reference_sequence_position"] == "35,154"
+
+    def test_run_mapping(
+        self,
+        mapping_pipeline: MappingPipeline,
+        test_project_dir: Path,
+        expected_mapping_df: pd.DataFrame,
+        expected_coverage_df: pd.DataFrame,
+    ):
+        os.makedirs(test_project_dir / "output", exist_ok=True)
+
+        mapping_pipeline.run_mapping(1, verbose=False)
+
+        result_mapping_df = pd.read_csv(
+            f"{test_project_dir}/output/mapping_5mers_max_1_mismatches.tsv",
+            sep="\t",
+            index_col=0,
+        ).fillna("")
+
+        result_coverage_df = pd.read_csv(
+            f"{test_project_dir}/output/coverage_5mers_max_1_mismatches.tsv",
+            sep="\t",
+            index_col=0,
+        ).fillna("")
+
+        pd.testing.assert_frame_equal(result_mapping_df, expected_mapping_df)
+        pd.testing.assert_frame_equal(result_coverage_df, expected_coverage_df)
