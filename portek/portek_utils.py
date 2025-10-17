@@ -89,17 +89,17 @@ class BasePipeline:
         else:
             self.k = k
 
-        self.sample_groups = None
-        self.input_files = None
-        self.header_format = None
-        self.mode = None
-        self.goi = None
-        self.control_groups = None
-        self.kmer_set = None
-        self.sample_list = None
-        self.sample_group_dict = None
-        self.ref_seq_name = None
-        self.ref_seq = None
+        self.sample_groups = []
+        self.input_files = []
+        self.header_format = []
+        self.mode = ""
+        self.goi = ""
+        self.control_groups = []
+        self.kmer_set = set()
+        self.sample_list = []
+        self.sample_group_dict = {}
+        self.ref_seq_name = ""
+        self.ref_seq = ""
         self.ref_genes = {}
 
         self._load_and_check_config(project_dir)
