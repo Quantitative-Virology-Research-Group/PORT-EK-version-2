@@ -12,10 +12,12 @@ from Bio import SeqIO
 import portek
 from portek.portek_utils import BasePipeline
 
+
 class KmerFinder(BasePipeline):
     """
     KmerFinder:
     """
+
     def _read_seq(self, group, file, header_format):
         in_path = f"{self.project_dir}/input/{file}"
         seq_list = list(SeqIO.parse(in_path, format="fasta"))
@@ -36,15 +38,13 @@ class KmerFinder(BasePipeline):
         samplelist_path = f"{self.project_dir}/input/indices/"
         if os.path.exists(samplelist_path) == False:
             os.makedirs(samplelist_path)
-        with open(
-            f"{samplelist_path}/{group}_sample_list.pkl", mode="wb"
-        ) as out_file:
+        with open(f"{samplelist_path}/{group}_sample_list.pkl", mode="wb") as out_file:
             pickle.dump(sample_list, out_file, protocol=pickle.HIGHEST_PROTOCOL)
 
     def __init__(self, project_dir: str, mink: int, maxk: int) -> None:
         super().check_min_max_k(mink, maxk)
         super().__init__(project_dir)
-        
+
         self.seq_lists = []
         for i, group in enumerate(self.sample_groups):
             self._read_seq(group, self.input_files[i], self.header_format[i])
@@ -78,7 +78,7 @@ class KmerFinder(BasePipeline):
                         kmers_pos_dict[kmer].append(i + 1)
                         avg_dict[kmer] += 1 / group_size
                     else:
-                        kmers_dict[kmer] = 1  
+                        kmers_dict[kmer] = 1
                         if kmer in freq_dict.keys():
                             freq_dict[kmer] += 1 / group_size
                             avg_dict[kmer] += 1 / group_size
@@ -284,7 +284,6 @@ class FindOptimalKPipeline(BasePipeline):
             columns=["spec", "mem", "dt", "spec_rank", "mem_rank", "dt_rank", "score"],
             dtype=float,
         )
-        result_df["dt"] = result_df["dt"].astype("object")
 
         for result in results:
             if result != None:
