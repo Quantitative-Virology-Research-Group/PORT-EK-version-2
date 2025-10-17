@@ -1,28 +1,10 @@
 import itertools
-import math
-import multiprocessing
-import operator
 import os
 import pathlib
 import pickle
-import shutil
-import subprocess
-import json
 
-import matplotlib.axes
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-import pysam
-import regex
-import seaborn as sns
-import yaml
-from Bio import SeqIO
-from scipy.ndimage import histogram
-from scipy.signal import find_peaks
-from scipy.stats import linregress
 
-import portek
 from portek.portek_utils import BasePipeline
 
 
