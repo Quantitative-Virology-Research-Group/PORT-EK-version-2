@@ -13,62 +13,26 @@ from sklearn import decomposition
 from Bio import SeqRecord, SeqIO, Seq
 
 import portek
+from portek.portek_utils import BasePipeline
 
-
-class EnrichedKmersPipeline:
+class EnrichedKmersPipeline(BasePipeline):
     """
     EnrichedKmersPipeline:
     """
 
     def __init__(self, project_dir: str, k: int) -> None:
-        if os.path.isdir(project_dir) == True:
-            self.project_dir = project_dir
-        else:
-            raise NotADirectoryError("Project directory does not exist!")
-
-        if type(k) != int:
-            raise TypeError("k must by an integer!")
-        else:
-            self.k = k
-
-        try:
-            with open(f"{project_dir}/config.yaml", "r") as config_file:
-                config = yaml.safe_load(config_file)
-            self.sample_groups = config["sample_groups"]
-            self.mode = config["mode"]
-            if self.mode == "ovr":
-                self.goi = config["goi"]
-                self.control_groups = self.sample_groups.copy()
-                self.control_groups.remove(self.goi)
-            elif self.mode == "ava":
-                self.goi = None
-                self.control_groups = None
-            else:
-                raise ValueError(
-                    "Unrecognized analysis mode, should by ava or ovr. Check your config file!"
-                )
-
-            self.freq_cols = [f"{group}_freq" for group in self.sample_groups]
-            self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
-            self.c_cols = [f"{group}_c" for group in self.sample_groups]
-            self.f_cols = [f"{group}_f" for group in self.sample_groups]
-
-        except FileNotFoundError:
-            raise FileNotFoundError(
-                f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
-        except ValueError:
-            raise ValueError(
-                f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
-
-        self.kmer_set = None
-        self.sample_list = None
-        self.sample_group_dict = None
+        super().__init__(project_dir, k)
+        super().load_sample_list()
+        super().load_kmer_set(k)
+        self.freq_cols = [f"{group}_freq" for group in self.sample_groups]
+        self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
+        self.c_cols = [f"{group}_c" for group in self.sample_groups]
+        self.f_cols = [f"{group}_f" for group in self.sample_groups]
         self.enriched_groups = None
         self.err_cols = None
         self.p_cols = None
         self.matrices = {}
+        print(f"\nImported {len(self.kmer_set)} kmers and {len(self.sample_list)} samples.")
 
     def _filter_by_entropy_and_freq(
         self, matrix: pd.DataFrame, min_F: float = None
@@ -108,54 +72,16 @@ class EnrichedKmersPipeline:
         return common_kmer_matrix
 
     def get_basic_kmer_stats(self, save_rare: bool = False):
-
-        kmer_set = set()
-        sample_list = []
-        kmer_set_in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
-            f"{self.k}mer_*_set.pkl"
-        )
-        sample_list_in_path = pathlib.Path(f"{self.project_dir}/input/indices").glob(
-            "*sample_list.pkl"
-        )
-
-        for filename in kmer_set_in_path:
-            with open(filename, mode="rb") as in_file:
-                partial_set = pickle.load(in_file)
-            kmer_set.update(partial_set)
-        kmer_set = list(kmer_set)
-        if len(kmer_set) == 0:
-            raise FileNotFoundError(
-                f"No {self.k}-mers found in project directory! Make sure you generate them using PORT-EK find_k."
-            )
-
-        for filename in sample_list_in_path:
-            with open(filename, mode="rb") as in_file:
-                partial_list = pickle.load(in_file)
-            group = filename.stem.split("_")[0]
-            partial_list = [f"{group}_{sample_name}" for sample_name in partial_list]
-            sample_list.extend(partial_list)
-
         all_kmer_matrix = pd.DataFrame(
             0.0,
-            index=kmer_set,
+            index=self.kmer_set,
             columns=self.freq_cols + self.avg_cols,
             dtype=np.float64,
         ).sort_index()
 
-        sample_group_dict = {
-            f"{group}": [
-                sample for sample in sample_list if sample.split("_")[0] == f"{group}"
-            ]
-            for group in self.sample_groups
-        }
         group_len_dict = {
-            f"{group}": len(sample_group_dict[group]) for group in self.sample_groups
+            f"{group}": len(self.sample_group_dict[group]) for group in self.sample_groups
         }
-
-        self.kmer_set = kmer_set
-        self.sample_list = sample_list
-        self.sample_group_dict = sample_group_dict
-        print(f"\nImported {len(kmer_set)} kmers and {len(sample_list)} samples.")
 
         in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
             f"{self.k}mer_*_avg_dict.pkl"
@@ -197,25 +123,29 @@ class EnrichedKmersPipeline:
     def _compare_group_pair(
         self, matrix_type: str, group1: str, group2: str, verbose: bool = False
     ) -> tuple[str, str, pd.Series, pd.Series, pd.Series]:
-        if verbose == True:
-            print(f"Calculating differences for groups {group1} and {group2}.")
-        avg_counts_i = self.matrices[matrix_type][f"{group1}_avg"]
-        avg_counts_j = self.matrices[matrix_type][f"{group2}_avg"]
-        errors = avg_counts_i - avg_counts_j
-        group1_samples = self.sample_group_dict[group1]
-        group2_samples = self.sample_group_dict[group2]
-        p_values = self.matrices[matrix_type].apply(
-            lambda row: stats.mannwhitneyu(
-                row[group1_samples], row[group2_samples]
-            ).pvalue,
-            axis=1,
-        )
-        with np.errstate(divide="ignore"):
-            log_p_values = -np.log10(p_values)
-        if verbose == True:
-            print(f"Done calculating differences for groups {group1} and {group2}.")
-        return group1, group2, errors, p_values, log_p_values
-
+        try:
+            if verbose == True:
+                print(f"Calculating differences for groups {group1} and {group2}.")
+            avg_counts_i = self.matrices[matrix_type][f"{group1}_avg"]
+            avg_counts_j = self.matrices[matrix_type][f"{group2}_avg"]
+            errors = avg_counts_i - avg_counts_j
+            group1_samples = self.sample_group_dict[group1]
+            group2_samples = self.sample_group_dict[group2]
+            p_values = self.matrices[matrix_type].apply(
+                lambda row: stats.mannwhitneyu(
+                    row[group1_samples], row[group2_samples]
+                ).pvalue,
+                axis=1,
+            )
+            with np.errstate(divide="ignore"):
+                log_p_values = -np.log10(p_values)
+            if verbose == True:
+                print(f"Done calculating differences for groups {group1} and {group2}.")
+            return group1, group2, errors, p_values, log_p_values
+        except Exception as e:
+            raise RuntimeError(
+                f"Error comparing groups {group1} and {group2}: {e}"
+            ) from e
     def calc_kmer_stats(self, matrix_type: str, n_jobs: int = 4, verbose: bool = False):
         print(f"\nGetting {matrix_type} {self.k}-mer counts.")
         count_df = pd.DataFrame(
@@ -265,9 +195,13 @@ class EnrichedKmersPipeline:
                     )
 
             with multiprocessing.get_context("forkserver").Pool(n_jobs) as pool:
-                results = pool.starmap(
-                    self._compare_group_pair, group_pairs, chunksize=1
-                )
+                try:
+                    results = pool.starmap(
+                        self._compare_group_pair, group_pairs, chunksize=1
+                    )
+                except Exception as e:
+                    print(f"An error occurred during multiprocessing: {e}")
+                    raise
 
             for result in results:
                 err_name = f"{result[0]}-{result[1]}_err"
@@ -311,9 +245,13 @@ class EnrichedKmersPipeline:
                 )
 
             with multiprocessing.get_context("forkserver").Pool(n_jobs) as pool:
-                results = pool.starmap(
-                    self._compare_group_pair, group_pairs, chunksize=1
-                )
+                try:
+                    results = pool.starmap(
+                        self._compare_group_pair, group_pairs, chunksize=1
+                    )
+                except Exception as e:
+                    print(f"An error occurred during multiprocessing: {e}")
+                    raise
 
             for result in results:
                 err_name = f"{result[0]}-{result[1]}_err"
@@ -323,32 +261,6 @@ class EnrichedKmersPipeline:
                 self.matrices[matrix_type][err_name] = result[2]
                 self.matrices[matrix_type][p_name] = result[3]
                 self.matrices[matrix_type][f"-log10_{p_name}"] = result[4]
-                # err_name = f"{self.goi}-{group}_err"
-                # p_name = f"{self.goi}-{group}_p-value"
-                # err_cols.append(err_name)
-                # p_cols.append(p_name)
-                # avg_counts_goi = self.matrices[matrix_type][f"{self.goi}_avg"]
-                # avg_counts_j = self.matrices[matrix_type][f"{group}_avg"]
-                # self.matrices[matrix_type][err_name] = avg_counts_goi - avg_counts_j
-                # self.matrices[matrix_type][p_name] = self.matrices[
-                #     matrix_type
-                # ].index.map(
-                #     lambda id: portek.calc_kmer_pvalue(
-                #         id,
-                #         self.sample_group_dict[self.goi],
-                #         self.sample_group_dict[group],
-                #         self.matrices[matrix_type],
-                #         self.freq_cols,
-                #         err_cols,
-                #     )
-                # )
-                # self.matrices[matrix_type][f"-log10_{p_name}"] = -np.log10(
-                #     self.matrices[matrix_type][p_name]
-                # )
-                # if verbose == True:
-                #     print(
-                #         f"Done calculating differences for group of interest {self.goi} and control group {group}."
-                #     )
 
             self.matrices[matrix_type]["RMSE"] = np.sqrt(
                 ((self.matrices[matrix_type][err_cols]) ** 2).mean(axis=1)
@@ -500,12 +412,13 @@ class EnrichedKmersPipeline:
 
     def save_matrix(self, matrix_type: str, full: bool = False):
         print(f"\nSaving {matrix_type} {self.k}-mers matrix.")
-        self.matrices[matrix_type].index = self.matrices[matrix_type].index.map(
+        df_to_save = self.matrices[matrix_type].copy()
+        df_to_save.index = df_to_save.index.map(
             lambda id: portek.decode_kmer(id, self.k)
         )
         if full == True:
             out_filename = f"{self.project_dir}/output/{matrix_type}_{self.k}mers.csv"
-            self.matrices[matrix_type].to_csv(out_filename, index_label="kmer")
+            df_to_save.to_csv(out_filename, index_label="kmer")
         else:
             out_filename = (
                 f"{self.project_dir}/output/{matrix_type}_{self.k}mers_stats.csv"
@@ -515,24 +428,12 @@ class EnrichedKmersPipeline:
                 + list(itertools.chain(*zip(self.err_cols, self.p_cols)))
                 + ["RMSE", "group", "exclusivity"]
             )
-            self.matrices[matrix_type].loc[:, export_cols].to_csv(
+            df_to_save.loc[:, export_cols].to_csv(
                 out_filename, index_label="kmer"
             )
 
-    def save_kmers_as_reads(self):
-        for group in self.sample_groups:
-            ids = []
-            kmers = []
-            for kmer in self.matrices["enriched"].index:
-                count = int(
-                    round(
-                        self.matrices["enriched"].loc[kmer, f"{group}_avg"]
-                        * len(self.sample_group_dict[group])
-                    )
-                )
-                kmers.extend([kmer] * count)
-                for i in range(count):
-                    ids.append(f"{kmer}{i}")
-            portek.save_kmers_fasta(
-                kmers=kmers, ids=ids, name=group, directory=self.project_dir, k=self.k
-            )
+    # def save_enriched_kmers(self):
+    #     kmers_to_save = self.matrices["enriched"].index.to_list()
+    #     with open(f"{self.project_dir}/temp/enriched_{self.k}mers.pkl", mode="wb") as out_file:
+    #         pickle.dump(kmers_to_save, out_file)
+   

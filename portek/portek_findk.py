@@ -5,91 +5,49 @@ import pickle
 import multiprocessing
 import numpy as np
 import pandas as pd
-
-# import matplotlib.pyplot as plt
-# import seaborn as sns
 from collections import defaultdict
-
-# from sklearn.preprocessing import MinMaxScaler
 from time import process_time
 from Bio import SeqIO
 
+import portek
+from portek.portek_utils import BasePipeline
 
-class KmerFinder:
+
+class KmerFinder(BasePipeline):
     """
     KmerFinder:
     """
 
+    def _read_seq(self, group, file, header_format):
+        in_path = f"{self.project_dir}/input/{file}"
+        seq_list = list(SeqIO.parse(in_path, format="fasta"))
+        for seq in seq_list:
+            if header_format == "gisaid":
+                if len(seq.id.split("|")) > 1:
+                    seq.id = seq.id.split("|")[1]
+            elif header_format == "ncbi":
+                seq.id = seq.id.split("|")[0][:-1]
+            if "/" in seq.id:
+                raise ValueError(
+                    "Sequence ids cannot contain '/'. Specify correct header formats in the config file."
+                )
+            seq.seq = seq.seq.upper()
+
+        sample_list = [seq.id for seq in seq_list]
+        self.seq_lists.append(seq_list)
+        samplelist_path = f"{self.project_dir}/input/indices/"
+        if os.path.exists(samplelist_path) == False:
+            os.makedirs(samplelist_path)
+        with open(f"{samplelist_path}/{group}_sample_list.pkl", mode="wb") as out_file:
+            pickle.dump(sample_list, out_file, protocol=pickle.HIGHEST_PROTOCOL)
+
     def __init__(self, project_dir: str, mink: int, maxk: int) -> None:
-        if os.path.isdir(project_dir) == True:
-            self.project_dir = project_dir
-        else:
-            raise NotADirectoryError("Project directory does not exist!")
-
-        if type(mink) != int or mink < 5 or mink % 2 == 0:
-            raise TypeError(
-                "Minimum k must by an odd integer not smaller than 5!"
-            )
-        else:
-            self.mink = mink
-
-        if type(maxk) != int or maxk < 5 or maxk % 2 == 0:
-            raise TypeError(
-                "Maximum k must by an odd integer not smaller than 5!"
-            )
-        else:
-            self.maxk = maxk
-
-        try:
-            with open(f"{project_dir}/config.yaml", "r") as config_file:
-                config = yaml.safe_load(config_file)
-            self.sample_groups = config["sample_groups"]
-            if len(config["header_format"]) != 0:
-                self.input_fastas = zip(
-                    config["input_files"],
-                    config["header_format"],
-                    config["sample_groups"],
-                )
-            else:
-                self.input_fastas = zip(
-                    config["input_files"],
-                    ["plain"] * len(config["input_files"]),
-                    config["sample_groups"],
-                )
-
-        except:
-            raise FileNotFoundError(
-                f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
+        super().check_min_max_k(mink, maxk)
+        super().__init__(project_dir)
 
         self.seq_lists = []
-
-        for in_file, header_format, group in self.input_fastas:
-            in_path = f"{self.project_dir}/input/{in_file}"
-            seq_list = list(SeqIO.parse(in_path, format="fasta"))
-            for seq in seq_list:
-
-                if header_format == "gisaid":
-                    if len(seq.id.split("|")) > 1:
-                        seq.id = seq.id.split("|")[1]
-                elif header_format == "ncbi":
-                    seq.id = seq.id.split("|")[0][:-1]
-
-                if "/" in seq.id:
-                    raise ValueError(
-                        "Sequence ids cannot contain '/'. Specify correct header formats in the config file."
-                    )
-                seq.seq = seq.seq.upper()
-
-            sample_list = [seq.id for seq in seq_list]
-            self.seq_lists.append(seq_list)
-            samplelist_path = f"{self.project_dir}/input/indices/"
-            if os.path.exists(samplelist_path) == False:
-                os.makedirs(samplelist_path)
-            with open(
-                f"{samplelist_path}/{group}_sample_list.pkl", mode="wb"
-            ) as out_file:
-                pickle.dump(sample_list, out_file, protocol=pickle.HIGHEST_PROTOCOL)
+        for i, group in enumerate(self.sample_groups):
+            self._read_seq(group, self.input_files[i], self.header_format[i])
 
     def _unknown_nuc(self):
         return "X"
@@ -98,11 +56,6 @@ class KmerFinder:
         start_time = process_time()
         if verbose == True:
             print(f"Finding all {k}-mers in {group} sequences.", flush=True)
-        encoding = defaultdict(self._unknown_nuc)
-        encoding["A"] = "00"
-        encoding["C"] = "01"
-        encoding["G"] = "10"
-        encoding["T"] = "11"
         kmer_set = set()
 
         group_size = len(seq_list)
@@ -111,7 +64,7 @@ class KmerFinder:
         kmers_pos_dict = {}
         for seq in seq_list:
             seqid = seq.id
-            seq = [encoding[nuc] for nuc in seq.seq]
+            seq = portek.encode_seq(seq.seq)
             kmers_dict = {}
 
             for i in range(0, len(seq) - k + 1):
@@ -125,7 +78,7 @@ class KmerFinder:
                         kmers_pos_dict[kmer].append(i + 1)
                         avg_dict[kmer] += 1 / group_size
                     else:
-                        kmers_dict[kmer] = 1  
+                        kmers_dict[kmer] = 1
                         if kmer in freq_dict.keys():
                             freq_dict[kmer] += 1 / group_size
                             avg_dict[kmer] += 1 / group_size
@@ -198,83 +151,28 @@ class KmerFinder:
         return time_dict
 
 
-class FindOptimalKPipeline:
+class FindOptimalKPipeline(BasePipeline):
     """
     FindOptimalKPipeline:
     """
 
     def __init__(self, project_dir: str, mink: int, maxk: int, times) -> None:
-        if os.path.isdir(project_dir) == True:
-            self.project_dir = project_dir
-        else:
-            raise NotADirectoryError("Project directory does not exist!")
+        super().check_min_max_k(mink, maxk)
+        super().__init__(project_dir)
 
-        if type(mink) != int or mink < 5 or mink % 2 == 0:
-            raise TypeError(
-                "Minimum k must by an odd integer not smaller than 5!"
-            )
-        else:
-            self.mink = mink
-
-        if type(maxk) != int or maxk < 5 or maxk % 2 == 0:
-            raise TypeError(
-                "Maximum k must by an odd integer not smaller than 5!"
-            )
-        else:
-            self.maxk = maxk
-        try:
-            with open(f"{project_dir}/config.yaml", "r") as config_file:
-                config = yaml.safe_load(config_file)
-            self.sample_groups = config["sample_groups"]
-            self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
-            self.freq_cols = [f"{group}_freq" for group in self.sample_groups]
-            self.c_cols = [f"{group}_c" for group in self.sample_groups]
-            self.f_cols = [f"{group}_f" for group in self.sample_groups]
-            self.mode = config["mode"]
-            if self.mode == "ovr":
-                self.goi = config["goi"]
-                self.control_groups = self.sample_groups.copy()
-                self.control_groups.remove(self.goi)
-            else:
-                self.goi = None
-                self.control_groups = None
-
-        except:
-            raise FileNotFoundError(
-                f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
         self.times = times
+        self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
+        self.freq_cols = [f"{group}_freq" for group in self.sample_groups]
+        self.c_cols = [f"{group}_c" for group in self.sample_groups]
+        self.f_cols = [f"{group}_f" for group in self.sample_groups]
 
     def _calc_metrics(self, k: int, verbose: bool = False):
 
         start_time = process_time()
         if verbose == True:
             print(f"Calculating metrics for {k}-mers.", flush=True)
-        kmer_set = set()
-        sample_list = []
-        kmer_set_in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
-            f"{k}mer_*_set.pkl"
-        )
-        sample_list_in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
-            "*sample_list.pkl"
-        )
-
-        for filename in kmer_set_in_path:
-            with open(filename, mode="rb") as in_file:
-                partial_set = pickle.load(in_file)
-            kmer_set.update(partial_set)
-        if len(kmer_set) == 0:
-            if verbose == True:
-                print(f"No {k}-mers found. Skipping.", flush=True)
-            return None
-        kmer_set = list(kmer_set)
-
-        for filename in sample_list_in_path:
-            with open(filename, mode="rb") as in_file:
-                partial_list = pickle.load(in_file)
-            group = filename.stem.split("_")[0]
-            partial_list = [f"{group}_{sample_name}" for sample_name in partial_list]
-            sample_list.extend(partial_list)
+        kmer_set = super().load_kmer_set(k)
+        sample_list = super().load_sample_list()
 
         all_kmer_stat_matrix = pd.DataFrame(
             0.0,
@@ -386,7 +284,6 @@ class FindOptimalKPipeline:
             columns=["spec", "mem", "dt", "spec_rank", "mem_rank", "dt_rank", "score"],
             dtype=float,
         )
-        result_df["dt"] = result_df["dt"].astype("object")
 
         for result in results:
             if result != None:

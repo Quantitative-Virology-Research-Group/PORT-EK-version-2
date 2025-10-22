@@ -1,586 +1,274 @@
 import itertools
-import math
-import multiprocessing
-import operator
 import os
 import pathlib
 import pickle
-import shutil
-import subprocess
 
-import matplotlib.axes
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-import pysam
-import regex
-import seaborn as sns
-import yaml
-from Bio import SeqIO
-from scipy.ndimage import histogram
-from scipy.signal import find_peaks
-from scipy.stats import linregress
 
-import portek
+from portek.portek_utils import BasePipeline
 
 
-class MappingPipeline:
+class MappingPipeline(BasePipeline):
 
-    def __init__(self, project_dir: str, k):
-        if os.path.isdir(project_dir) == True:
-            self.project_dir = project_dir
-        else:
-            raise NotADirectoryError("Project directory does not exist!")
-
-        if type(k) != int:
-            raise TypeError("k must by an integer!")
-        else:
-            self.k = k
-
-        try:
-            with open(f"{project_dir}/config.yaml", "r") as config_file:
-                config = yaml.safe_load(config_file)
-            self.sample_groups = config["sample_groups"]
-            self.mode = config["mode"]
-            if self.mode == "ovr":
-                self.goi = config["goi"]
-                self.control_groups = self.sample_groups.copy()
-                self.control_groups.remove(self.goi)
-            elif self.mode == "ava":
-                self.goi = None
-                self.control_groups = None
-            else:
-                err_msg = "Unrecognized analysis mode, should by ava or ovr. Check your config file!"
-                raise ValueError()
-
-            self.ref_seq_name = ".".join(config["ref_seq"].split(".")[:-1])
-            try:
-                self.ref_seq = str(
-                    SeqIO.read(
-                        f"{project_dir}/input/{config['ref_seq']}", format="fasta"
-                    ).seq
-                )
-            except ValueError:
-                err_msg = "No or wrong reference sequence file!"
-                raise ValueError()
-            if "ref_genes" in config.keys():
-                self.ref_genes = config["ref_genes"]
-            else:
-                self.ref_genes = None
-
-            self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
-
-        except FileNotFoundError:
-            raise FileNotFoundError(
-                f"No config.yaml file found in directory {project_dir} or the file has missing/wrong configuration!"
-            )
-        except ValueError:
-            raise ValueError(err_msg)
-
+    def __init__(self, project_dir: str, k: int):
+        super().__init__(project_dir, k)
+        self.kmer_index = {}
         self.matrices = {}
+
         try:
             self.matrices["enriched"] = pd.read_csv(
                 f"{project_dir}/output/enriched_{self.k}mers_stats.csv", index_col=0
             )
-
         except:
             raise FileNotFoundError(
-                f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK enriched first!"
+                f"No enriched {self.k}-mers table found in {project_dir}output/ ! Please run PORT-EK find_enriched first!"
             )
+        self._initialize_mapping_dataframe()
+        self._initialize_coverage_dataframe()
 
-        self.mutations = None
-        self.sample_list = None
-        self.sample_group_dict = None
-        self.group_avg_pos = None
-
-    def get_samples(self, verbose: bool = False):
-        sample_list_in_path = pathlib.Path(f"{self.project_dir}/input/indices").glob(
-            "*sample_list.pkl"
+    def _initialize_mapping_dataframe(self):
+        self.matrices["mapping"] = pd.DataFrame(
+            [[[], "", 0, "", ""]],
+            columns=[
+                "reference_sequence_position",
+                "gene",
+                "number_of_mismatches",
+                "group",
+                "exclusivity",
+            ],
+            index=self.matrices["enriched"].index,
         )
-        sample_list = []
-        for filename in sample_list_in_path:
-            with open(filename, mode="rb") as in_file:
-                partial_list = pickle.load(in_file)
-            group = filename.stem.split("_")[0]
-            partial_list = [f"{group}_{sample_name}" for sample_name in partial_list]
-            sample_list.extend(partial_list)
-        sample_group_dict = {
-            f"{group}": [
-                sample for sample in sample_list if sample.split("_")[0] == f"{group}"
-            ]
-            for group in self.sample_groups
-        }
-        if len(sample_list) == 0:
-            raise FileNotFoundError("No sample lists found!")
-        self.sample_list = sample_list
-        self.sample_group_dict = sample_group_dict
 
-    def _check_bowtie2_path(self):
-        return shutil.which("bowtie2")
-
-    def _check_index_built(self):
-        index_files = list(
-            pathlib.Path(f"{self.project_dir}/temp/ref_index/").glob(
-                f"{self.ref_seq_name}.*"
-            )
+    def _initialize_coverage_dataframe(self):
+        self.matrices["coverage"] = pd.DataFrame(
+            0,
+            columns=[f"{group}_enriched" for group in self.sample_groups]
+            + ["conserved"],
+            index=pd.RangeIndex(start=1, stop=len(self.ref_seq) + 1, step=1),
         )
-        if len(index_files) == 0:
-            return False
+
+    def run_mapping(self, max_n_mismatch: int, verbose: bool = False) -> None:
+        self.index_ref_seq(max_n_mismatch, verbose)
+
+        for kmer in self.matrices["mapping"].index:
+            mapping_dict = self.map_kmer_to_index(kmer, max_n_mismatch)
+            self.add_kmer_to_mapping_df(max_n_mismatch, kmer, mapping_dict)
+            self.update_mapping_df_group(kmer)
+            if self.ref_genes:
+                self.update_mapping_df_genes(kmer)
+
+        self.fill_coverage_dataframe()
+        self.save_mapping_and_coverage(max_n_mismatch)
+
+    def index_ref_seq(self, max_mismatches: int, verbose: bool = False) -> None:
+        if self._check_index(max_mismatches) == False:
+            self._generate_and_write_index(max_mismatches, verbose)
         else:
-            return True
+            self._load_index(max_mismatches, verbose)
 
-    def _bowtie_build_index(self, verbose: bool = False):
-        if os.path.exists(f"{self.project_dir}/temp/ref_index/") == False:
-            os.makedirs(f"{self.project_dir}/temp/ref_index")
-        build_cmd = [
-            f"bowtie2-build",
-            "-f",
-            f"{self.project_dir}/input/{self.ref_seq_name}.fasta",
-            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}",
-        ]
-        result = subprocess.run(build_cmd, capture_output=True, text=True)
+    def _check_index(self, max_mismatches: int) -> bool:
+        return pathlib.Path(
+            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_mismatches}.pkl"
+        ).exists()
+
+    def _generate_and_write_index(self, max_mismatches, verbose):
         if verbose == True:
-            print(build_cmd)
-        if result.returncode != 0:
-            raise Exception(result.stderr)
-        else:
-            if verbose == True:
-                print(result.stdout)
+            print(
+                f"No {self.k}-mer index with maximum distance {max_mismatches} exists for {self.ref_seq_name}, building index."
+            )
+        kmer_index = self._generate_index(max_mismatches, self.ref_seq)  # type: ignore
+        self._write_index(max_mismatches, kmer_index)
 
-    def _bowtie_map(self, verbose: bool = False):
-        seed_length = int(math.ceil(self.k / 2))
-        map_cmd = [
-            f"bowtie2",
-            "--norc",
-            "-a",
-            "-L",
-            f"{seed_length}",
-            "--score-min",
-            "L,-0.6,-1",
-            "-x",
-            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}",
-            "-f",
-            f"{self.project_dir}/temp/enriched_{self.k}mers.fasta",
-            "-S",
-            f"{self.project_dir}/temp/enriched_{self.k}mers.sam",
-        ]
         if verbose == True:
-            print(" ".join(map_cmd))
-        result = subprocess.run(map_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise Exception(result.stderr)
-        else:
-            if verbose == True:
-                print(result.stdout)
-
-    def run_mapping(self, verbose: bool = False):
-        if self._check_bowtie2_path() == None:
-            raise FileNotFoundError(
-                f"bowtie2 not found! Please install bowtie and add it to your PATH!"
+            print(
+                f"Finished building {self.k}-mer index with maximum distance {max_mismatches} exists for {self.ref_seq_name}"
             )
-        if self._check_index_built() == False:
-            self._bowtie_build_index(verbose=verbose)
-        self._bowtie_map(verbose=verbose)
+            for d in range(max_mismatches + 1):
+                print(f"Extracted {len(kmer_index[d])} k-mers with distance {d}.")
+        self.kmer_index = kmer_index
 
-    def _parse_CIGAR(self, CIGAR_string: str) -> dict:
-        n_repeats = regex.findall(r"\d+", CIGAR_string)
-        matches = [char for char in CIGAR_string if char.isalpha()]
-        CIGAR_list = []
-        for n, m in zip(n_repeats, matches):
-            CIGAR_list.extend(int(n) * [m])
-        return CIGAR_list
+    def _generate_index(self, max_mismatches: int, ref_seq: str) -> dict:
+        kmer_index = {dist: {} for dist in range(max_mismatches + 1)}
+        for kmer_start_position in range(0, len(ref_seq) - self.k + 1):
+            kmer = ref_seq[kmer_start_position : kmer_start_position + self.k]
+            self._save_kmer_to_index(kmer_index, kmer_start_position, 0, kmer)
 
-    def _read_sam_to_df(self) -> pd.DataFrame:
-        reads = pysam.AlignmentFile(
-            f"{self.project_dir}/temp/enriched_{self.k}mers.sam", mode="r"
-        )
-
-        read_dict = {
-            "kmer": [],
-            "flag": [],
-            "ref_pos": [],
-            "CIGAR": [],
-            "n_mismatch": [],
-            "score": [],
-        }
-        for read in reads:
-            read_dict["kmer"].append(read.query_name)
-            read_dict["flag"].append(read.flag)
-            if read.reference_start == -1:
-                read_dict["ref_pos"].append(0)
-            else:
-                read_dict["ref_pos"].append(read.reference_start)
-            if read.cigarstring == None:
-                read_dict["CIGAR"].append("")
-            else:
-                read_dict["CIGAR"].append(read.cigarstring)
-            if read.has_tag("NM"):
-                read_dict["n_mismatch"].append(read.get_tag("NM", False))
-            else:
-                read_dict["n_mismatch"].append(0)
-            if read.has_tag("AS"):
-                read_dict["score"].append(read.get_tag("AS", False))
-            else:
-                read_dict["score"].append(-6 * self.k)
-
-        mappings_df = pd.DataFrame(read_dict)
-        mappings_df["CIGAR"] = mappings_df["CIGAR"].apply(self._parse_CIGAR)
-        mappings_df.loc[:, ["flag", "ref_pos", "n_mismatch"]] = mappings_df.loc[
-            :, ["flag", "ref_pos", "n_mismatch"]
-        ].astype(int)
-        mappings_df["group"] = self.matrices["enriched"]["group"]
-        mappings_df["mutations"] = "WT"
-        mappings_df["mapping_ok"] = 1
-        mappings_df["ref_pos"] = mappings_df.apply(
-            lambda row: row["ref_pos"] + 1 if row["flag"] != 4 else row["ref_pos"],
-            axis=1,
-        )
-        mappings_df["group"] = mappings_df["kmer"].apply(
-            lambda kmer: self.matrices["enriched"].loc[kmer, "group"]
-        )
-        return mappings_df
-
-    def _align_seqs(self, ref_seq, kmer, map_pos, cigar):
-        ref_start = map_pos
-        aln_len = len(cigar)
-        ref_end = ref_start + aln_len
-        q_seq = [nuc for nuc in kmer]
-        t_seq = [nuc for nuc in ref_seq[ref_start:ref_end]]
-        ref_pos = []
-        curr_pos = ref_start - 1
-        for i, change in enumerate(cigar):
-            if change == "D":
-                curr_pos += 1
-                q_seq.insert(i, "-")
-                ref_pos.append(curr_pos)
-            elif change == "I":
-                t_seq.insert(i, "-")
-                ref_pos.append(curr_pos)
-            else:
-                curr_pos += 1
-                ref_pos.append(curr_pos)
-
-        q_seq = q_seq[:aln_len]
-        t_seq = t_seq[:aln_len]
-        return q_seq, t_seq, ref_pos
-
-    def _join_indels(self, mutations: list):
-        subs = []
-        ins_pos = []
-        del_pos = []
-
-        for mut in mutations:
-            if mut[1] == "ins":
-                ins_pos.append(mut[0])
-            elif mut[1] == "del":
-                del_pos.append(mut[0])
-            else:
-                subs.append(mut)
-
-        ins_pos = set(ins_pos)
-        inss = []
-        dels = []
-
-        for start_pos in ins_pos:
-            muts = [
-                mut[2] for mut in mutations if mut[0] == start_pos and mut[1] == "ins"
-            ]
-            inss.append((start_pos, "ins", "".join(muts)))
-
-        for k, g in itertools.groupby(
-            enumerate(sorted(del_pos)), lambda x: x[0] - x[1]
-        ):
-            del_group_pos = list(map(operator.itemgetter(1), g))
-            dels.append((del_group_pos[0], "del", del_group_pos[-1]))
-        grouped_muts = subs + inss + dels
-        grouped_muts.sort()
-        return grouped_muts
-
-    def _find_variants(self, ref_seq, kmer, map_pos, cigar) -> list:
-        map_pos = map_pos - 1
-        mutations = []
-        q_seq, t_seq, ref_pos = self._align_seqs(ref_seq, kmer, map_pos, cigar)
-        if len(q_seq) != len(t_seq) != len(ref_pos):
-            raise ValueError(
-                f"Improper alingment of k-mer {q_seq}, reference {t_seq}, and refrence position {ref_pos}"
-            )
-        for i in range(len(q_seq)):
-            if q_seq[i] != t_seq[i]:
-                if q_seq[i] == "-":
-                    mutations.append((ref_pos[i] + 1, "del", ref_pos[i] + 1))
-                elif t_seq[i] == "-":
-                    mutations.append((ref_pos[i] + 1, "ins", q_seq[i]))
-                else:
-                    mutations.append((ref_pos[i] + 1, t_seq[i], q_seq[i]))
-
-        mutations = self._join_indels(mutations)
-        return mutations
-
-    def _mutation_tuple_to_text(self, mutation_as_tuple: tuple) -> str:
-        if mutation_as_tuple[1] == "del":
-            mutation_as_text = f"{mutation_as_tuple[0]}_{mutation_as_tuple[2]}del"
-        elif mutation_as_tuple[1] == "ins":
-            mutation_as_text = f"{mutation_as_tuple[0]}_{mutation_as_tuple[0]+1}ins{mutation_as_tuple[2]}"
-        else:
-            mutation_as_text = (
-                f"{mutation_as_tuple[0]}{mutation_as_tuple[1]}>{mutation_as_tuple[2]}"
-            )
-        return mutation_as_text
-
-    def _load_kmer_pos(
-        self, input_filename: pathlib.Path, kmers: np.ndarray, verbose: bool = False
-    ) -> None:
-        if verbose == True:
-            print(f"Loading k-mer positions from file {input_filename.stem}.")
-        with open(input_filename, mode="rb") as in_file:
-            group = f"{input_filename.stem.split('_')[1]}_enriched"
-            temp_dict = pickle.load(in_file)
-        temp_dict = {
-            portek.decode_kmer(id, self.k): positions
-            for id, positions in temp_dict.items()
-        }
-        distro = {kmer: temp_dict[kmer] for kmer in kmers if kmer in temp_dict.keys()}
-        if verbose == True:
-            print(f"Done loading k-mer positions from file {input_filename.stem}.")
-        return group, distro
-    
-    def _get_group_distros(self, pos_results: list) -> dict:
-        kmer_distros = {}
-        if self.mode == "ava":
-            for result in pos_results:
-                kmer_distros[result[0]] = result[1]
-        else:
-            kmer_distros["control_enriched"] = {}
-            for result in pos_results:
-                if result[0] == f"{self.goi}_enriched":
-                    kmer_distros[result[0]] = result[1]
-                else:
-                    kmer_distros["control_enriched"] = {
-                        kmer: kmer_distros["control_enriched"].get(kmer, []) + result[1].get(kmer, [])
-                        for kmer in set(
-                            list(kmer_distros["control_enriched"].keys()) + list(result[1].keys())
-                        )
-                    }
-        return kmer_distros
-
-    def _get_total_distros(self, kmer_distros: dict) -> None:
-        total_distros = {}
-        for distros in kmer_distros.values():
-            for kmer, distro in distros.items():
-                if kmer in total_distros.keys():
-                    total_distros[kmer] = total_distros[kmer] + distro
-                else:
-                    total_distros[kmer] = distro
-        kmer_distros["conserved"] = total_distros
-
-    def _get_peaks_from_distro(self, kmer_distros: dict) -> dict:
-        distro_peaks = {group: {} for group in kmer_distros.keys()}
-        for group in distro_peaks.keys():
-            for kmer, distro in kmer_distros[group].items():
-                max_pos = max(max(distro), len(self.ref_seq))
-                bins = max_pos + 1
-                histogram_over_genome = histogram(distro, 0, max_pos, bins)
-                peaks = find_peaks(histogram_over_genome, distance=bins / 10)
-                distro_peaks[group][kmer] = peaks[0]
-        return distro_peaks
-
-    def _get_kmer_peaks(
-        self, mappings_df: pd.DataFrame, n_jobs: int = 4, verbose: bool = False
-    ):
-        print(f"\nLoading enriched {self.k}-mer position distributions.")
-        in_path = list(
-            pathlib.Path(f"{self.project_dir}/input/indices/").glob(
-                f"{self.k}mer_*_pos_dict.pkl"
-            )
-        )
-
-        kmers = mappings_df["kmer"].unique()
-        pool_args = []
-        for filename in in_path:
-            pool_args.append((filename, kmers, verbose))
-
-        with multiprocessing.get_context("forkserver").Pool(n_jobs) as pool:
-            results = pool.starmap(self._load_kmer_pos, pool_args, chunksize=1)
-
-        kmer_distros = self._get_group_distros(results)
-        self._get_total_distros(kmer_distros)
-        distro_peaks = self._get_peaks_from_distro(kmer_distros)
-        return distro_peaks
-
-    def _get_real_pos(
-        self, group: str, kmer: str, ref_pos: int, actual_positions: dict
-    ) -> int:
-        peaks = actual_positions[group][kmer]
-        diffs = abs(peaks - ref_pos)
-        return peaks[np.argmin(diffs)]
-
-    def _get_n_peaks(
-        self, group: str, kmer: str, ref_pos: int, actual_positions: dict
-    ) -> int:
-        peaks = actual_positions[group][kmer]
-        return len(peaks)
-
-    def _resolve_multiple_mappings(self, mappings_df: pd.DataFrame) -> pd.Index:
-        multimapped_kmers = np.unique(
-            mappings_df[mappings_df["flag"] == 256]["kmer"].to_numpy()
-        )
-        bad_mappings = pd.Index([])
-        for kmer in multimapped_kmers:
-            kmer_sub_df = mappings_df.loc[mappings_df["kmer"] == kmer].copy()
-            kmer_sub_df["pos_diff"] = abs(
-                kmer_sub_df["ref_pos"] - kmer_sub_df["real_pos"]
-            )
-            kmer_sub_df.sort_values(
-                ["score", "pos_diff"], ascending=[False, True], inplace=True
-            )
-            n_peaks = kmer_sub_df["n_peaks"].values[0]
-            bad_mappings = bad_mappings.union(kmer_sub_df.iloc[n_peaks:].index)
-        return bad_mappings
-
-    def _filter_mappings(
-        self, mappings_df: pd.DataFrame, verbose: bool = False
-    ) -> pd.DataFrame:
-        bad_mappings = self._resolve_multiple_mappings(mappings_df)
-        mappings_df.loc[bad_mappings, "mapping_ok"] = 0
-        mappings_df = mappings_df[mappings_df["mapping_ok"] == 1]
-        if verbose == True:
-            print(f"\nRejected {len(bad_mappings)} dubious alignments.")
-        return mappings_df
-
-    def _predict_unmapped(self, mappings_df: pd.DataFrame) -> pd.DataFrame:
-        mappings_with_pred_df = mappings_df.copy()
-        mappings_with_pred_df["pred_pos"] = 0
-        mappings_with_pred_df["pred_err"] = 0.0
-        mappings_with_pred_df["pred_r2"] = 0.0
-        for group in mappings_with_pred_df["group"].unique():
-            group_mappings = mappings_with_pred_df.loc[
-                mappings_with_pred_df["group"] == group
-            ].index
-            mapped = mappings_with_pred_df.loc[
-                (mappings_with_pred_df["ref_pos"] != 0)
-                & (mappings_with_pred_df["group"] == group)
-            ].index
-            if len(mapped) < 30:
-                print(
-                    f"Not enough mapped k-mers for position prediction in group {group}, skipping."
+            for n_mismatches in range(1, max_mismatches + 1):
+                sub_kmers = self._generate_sub_kmers(n_mismatches, kmer)
+                indel_kmers = self._generate_indel_kmers(
+                    n_mismatches, kmer, kmer_start_position, ref_seq
                 )
-                continue
-            real_mapped_pos = mappings_with_pred_df.loc[mapped, "real_pos"]
-            ref_mapped_pos = mappings_with_pred_df.loc[mapped, "ref_pos"]
-            regress = linregress(real_mapped_pos, ref_mapped_pos)
-            mappings_with_pred_df.loc[group_mappings, "pred_pos"] = round(
-                regress.slope * mappings_with_pred_df.loc[group_mappings, "real_pos"]
-                + regress.intercept
-            ).astype(int)
-            pred_mapped_err = (
-                mappings_with_pred_df.loc[mapped, "pred_pos"] - ref_mapped_pos
-            )
-            rmse = np.sqrt(sum(pred_mapped_err**2) / len(pred_mapped_err))
-            mappings_with_pred_df.loc[group_mappings, "pred_err"] = round(rmse, 2)
-            mappings_with_pred_df.loc[group_mappings, "pred_r2"] = round(
-                regress.rvalue, 2
-            )
-        return mappings_with_pred_df
+                ambi_kmers = sub_kmers.union(indel_kmers)
+                for ambi_kmer in ambi_kmers:
+                    self._save_kmer_to_index(
+                        kmer_index, kmer_start_position, n_mismatches, ambi_kmer
+                    )
 
-    def _format_mappings_df(self, mappings_df: pd.DataFrame) -> pd.DataFrame:
-        mappings_df.loc[mappings_df["flag"] == 4, "mutations"] = "-"
-        mappings_df.loc[mappings_df["flag"] == 4, "n_mismatch"] = self.k
-        formatted_df = mappings_df.drop(
-            ["flag", "CIGAR", "score", "mapping_ok", "n_peaks", "real_pos"], axis=1
-        ).sort_values("ref_pos")
-        return formatted_df
+        return kmer_index
 
-    def _count_mappings(self, mappings_df: pd.DataFrame):
-        num_kmers = len(self.matrices["enriched"])
-        validly_aln_kmers = mappings_df[mappings_df["flag"] != 4]["kmer"].to_numpy()
-        num_aligned = len(np.unique(validly_aln_kmers))
-        num_multiple = len(validly_aln_kmers) - num_aligned
-        num_unaligned = num_kmers - num_aligned
-        print(
-            f"\n{num_aligned} out of {num_kmers} {self.k}-mers were aligned to the reference."
-        )
-        print(f"Of those, {num_multiple} were aligned to more than one position.")
-        print(f"{num_unaligned} {self.k}-mers couldn't be aligned.")
-
-    def analyze_mapping(self, n_jobs: int = 4, verbose: bool = False):
-        mappings_df = self._read_sam_to_df()
-        actual_positions = self._get_kmer_peaks(mappings_df, n_jobs, verbose)
-        mappings_df["real_pos"] = mappings_df.apply(
-            lambda row: self._get_real_pos(
-                row["group"], row["kmer"], row["ref_pos"], actual_positions
-            ),
-            axis=1,
-        )
-        mappings_df["n_peaks"] = mappings_df.apply(
-            lambda row: self._get_n_peaks(
-                row["group"], row["kmer"], row["ref_pos"], actual_positions
-            ),
-            axis=1,
-        )
-        filtered_df = self._filter_mappings(mappings_df, verbose)
-        for row in filtered_df.itertuples():
-            if row.n_mismatch > 0:
-                mutations_as_tuples = self._find_variants(
-                    self.ref_seq, row.kmer, row.ref_pos, row.CIGAR
-                )
-                filtered_df.loc[row.Index, "mutations"] = "; ".join(
-                    [self._mutation_tuple_to_text(mut) for mut in mutations_as_tuples]
-                )
-
-        if verbose == True:
-            self._count_mappings(filtered_df)
-        mappings_with_pred_df = self._predict_unmapped(filtered_df)
-        formatted_df = self._format_mappings_df(mappings_with_pred_df)
-        self.matrices["mappings"] = formatted_df
-
-    def _set_histogram_ax_properties(
+    def _generate_sub_kmers(
         self,
-        subplot: matplotlib.axes.Axes,
-        max_pos: int,
-        group: str,
-        i: int,
-        fig_cols: int,
+        n_mismatches: int,
+        kmer: str,
+    ) -> set:
+
+        sub_kmers = set()
+        position_combinations = list(
+            itertools.combinations(range(self.k), n_mismatches)
+        )
+        for positions in position_combinations:
+            ambi_kmer = [nuc for nuc in kmer]
+            for pos in positions:
+                ambi_kmer[pos] = "N"
+            sub_kmers.add("".join(ambi_kmer))
+
+        return sub_kmers
+
+    def _generate_indel_kmers(
+        self,
+        n_mismatches: int,
+        kmer: str,
+        kmer_start_position: int,
+        ref_seq: str,
+        generate_deletions: bool = True,
+    ) -> set:
+
+        indel_kmers = set()
+        for position in range(1, self.k - n_mismatches):
+            in_kmer = [nuc for nuc in kmer]
+            in_kmer.insert(position, "N" * n_mismatches)
+            indel_kmers.add("".join(in_kmer[:-n_mismatches]))
+            if generate_deletions == True:
+                if position + n_mismatches >= self.k:
+                    continue
+                if kmer_start_position + self.k + n_mismatches > len(ref_seq):
+                    continue
+                del_kmer = [nuc for nuc in kmer]
+                del_kmer = (
+                    del_kmer[:position]
+                    + del_kmer[position + n_mismatches :]
+                    + [
+                        nuc
+                        for nuc in ref_seq[
+                            kmer_start_position
+                            + self.k : kmer_start_position
+                            + self.k
+                            + n_mismatches
+                        ]
+                    ]
+                )
+                indel_kmers.add("".join(del_kmer))
+
+        return indel_kmers
+
+    def _save_kmer_to_index(self, kmer_index, kmer_start_position, n_mismatches, kmer):
+        if kmer in kmer_index[n_mismatches].keys():
+            kmer_index[n_mismatches][kmer].append(kmer_start_position + 1)
+        else:
+            kmer_index[n_mismatches][kmer] = [kmer_start_position + 1]
+
+    def _write_index(self, max_mismatches, kmer_index):
+        os.makedirs(f"{self.project_dir}/temp/ref_index", exist_ok=True)
+        with open(
+            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_mismatches}.pkl",
+            mode="wb",
+        ) as out_file:
+            pickle.dump(kmer_index, out_file)
+
+    def _load_index(self, max_mismatches, verbose):
+        if verbose == True:
+            print(
+                f"{self.k}-mer index with maximum distance {max_mismatches} for {self.ref_seq_name} already exists, loading..."
+            )
+        with open(
+            f"{self.project_dir}/temp/ref_index/{self.ref_seq_name}_index_{self.k}_{max_mismatches}.pkl",
+            mode="rb",
+        ) as in_file:
+            kmer_index = pickle.load(in_file)
+        self.kmer_index = kmer_index
+
+    def map_kmer_to_index(
+        self,
+        kmer: str,
+        max_n_mismatch: int,
+    ) -> dict:
+        mapping_dict = {n: set() for n in range(max_n_mismatch + 1)}
+        for n_mismatch in range(max_n_mismatch + 1):
+            sub_kmers = self._generate_sub_kmers(n_mismatch, kmer)
+            in_kmers = self._generate_indel_kmers(
+                n_mismatch, kmer, 0, "", generate_deletions=False
+            )
+            ambi_kmers = sub_kmers.union(in_kmers)
+            for ambi_kmer in ambi_kmers:
+                if ambi_kmer in self.kmer_index[n_mismatch].keys():
+                    mapping_dict[n_mismatch] = mapping_dict[n_mismatch].union(
+                        self.kmer_index[n_mismatch][ambi_kmer]
+                    )
+        return mapping_dict
+
+    def add_kmer_to_mapping_df(
+        self, max_n_mismatch: int, kmer: str, mapping_dict: dict
     ) -> None:
-        subplot.set_title(group)
-        subplot.set_xlim(0, max_pos)
-        subplot.set_xlabel("Reference genome position")
-        if i % fig_cols == 0:
-            subplot.set_ylabel("K-mer counts")
 
-    def plot_kmer_histograms(self) -> None:
-        groups = self.matrices["mappings"]["group"].unique()
-        n_figs = len(groups)
-        fig_cols = min(n_figs, 3)
-        fig_rows = int(math.ceil(n_figs / fig_cols))
-        fig, axes = plt.subplots(
-            fig_rows, fig_cols, figsize=(fig_cols * 6, fig_rows * 6)
-        )
-        plt.subplots_adjust(hspace=0.25, wspace=0.25)
-        max_pos = len(self.ref_seq)
-        bins = 100
-        for i, group in enumerate(groups):
-            data = self.matrices["mappings"].loc[
-                (self.matrices["mappings"]["group"] == group)
-                & (self.matrices["mappings"]["ref_pos"] != 0),
-                "ref_pos",
+        for n_mismatch in range(max_n_mismatch + 1):
+            if len(mapping_dict[n_mismatch]) > 0:
+                self.matrices["mapping"].at[kmer, "reference_sequence_position"] = (
+                    sorted(list(mapping_dict[n_mismatch]))
+                )
+                self.matrices["mapping"].at[kmer, "number_of_mismatches"] = n_mismatch
+                break
+
+    def update_mapping_df_group(self, kmer: str) -> None:
+        self.matrices["mapping"].loc[kmer, ["group", "exclusivity"]] = self.matrices[
+            "enriched"
+        ].loc[kmer, ["group", "exclusivity"]]
+
+    def update_mapping_df_genes(self, kmer: str) -> None:
+        positions: list[int] = self.matrices["mapping"].at[kmer, "reference_sequence_position"]  # type: ignore
+        genes = set()
+        if positions:
+            for pos in positions:
+                genes_at_pos = self._find_genes_for_position(pos)
+                if genes_at_pos:
+                    genes.update(genes_at_pos.split(","))
+
+        self.matrices["mapping"].at[kmer, "gene"] = ", ".join(sorted(genes))
+
+    def _find_genes_for_position(self, position: int) -> str:
+        matching_genes = set()
+
+        for gene in self.ref_genes:
+            if isinstance(gene["start"], list):
+                for start, end in zip(gene["start"], gene["end"]):
+                    if start <= position <= end:
+                        matching_genes.add(gene["gene"])
+            elif gene["start"] <= position <= gene["end"]:
+                matching_genes.add(gene["gene"])
+
+        return ",".join(sorted(matching_genes)) if matching_genes else ""
+
+    def fill_coverage_dataframe(self) -> None:
+        for kmer in self.matrices["enriched"].index:
+            start_positions: list[int] = self.matrices["mapping"].at[
+                kmer, "reference_sequence_position"
             ]
-            if len(axes.shape) == 1:
-                subplot = axes[i]
-            else:
-                subplot = axes[i // fig_cols, i % fig_cols]
-            sns.histplot(data=data, ax=subplot, bins=bins)
-            self._set_histogram_ax_properties(subplot, max_pos, group, i, fig_cols)
-        plt.savefig(
-            f"{self.project_dir}/output/enriched_{self.k}-mers_coverage_histograms.svg",
-            format="svg",
-            dpi=300,
-            bbox_inches="tight",
-        )
+            group: str = self.matrices["enriched"].at[kmer, "group"]
+            if start_positions:
+                for start_position in start_positions:
+                    positions = [
+                        pos for pos in range(start_position, start_position + self.k)
+                    ]
+                    self.matrices["coverage"].loc[positions, group] += 1
 
-    def save_mappings_df(self):
-        print(f"\nSaving {self.k}-mer mappings.")
-        df_to_save = self.matrices["mappings"].copy()
-        df_to_save.index.name = "id"
-        df_to_save.to_csv(
-            f"{self.project_dir}/output/enriched_{self.k}mers_mappings.csv"
+    def save_mapping_and_coverage(self, max_n_mismatch: int) -> None:
+        self.matrices["mapping"]["reference_sequence_position"] = self.matrices[
+            "mapping"
+        ]["reference_sequence_position"].apply(lambda x: ",".join(map(str, x)))
+        self.matrices["mapping"].to_csv(
+            f"{self.project_dir}/output/mapping_{self.k}mers_max_{max_n_mismatch}_mismatches.tsv",
+            sep="\t",
+        )
+        self.matrices["coverage"].to_csv(
+            f"{self.project_dir}/output/coverage_{self.k}mers_max_{max_n_mismatch}_mismatches.tsv",
+            sep="\t",
         )
