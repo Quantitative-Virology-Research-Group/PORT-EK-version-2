@@ -58,9 +58,9 @@ class TestMappingPipelineInit:
             mapping_pipeline.matrices["enriched"].index
         )
         assert mapping_pipeline.matrices["coverage"].columns.tolist() == [
-            "group1_enriched",
-            "group2_enriched",
-            "conserved",
+            "group1_enriched_kmer_coverage",
+            "group2_enriched_kmer_coverage",
+            "conserved_kmer_coverage",
         ]
         assert mapping_pipeline.matrices["coverage"].index.equals(
             pd.Index([1, 2, 3, 4, 5, 6, 7])
@@ -361,11 +361,13 @@ class TestMappingPipelineMapping:
     def expected_coverage_df(self) -> pd.DataFrame:
         return pd.DataFrame(
             {
-                "group1_enriched": [0, 1, 1, 1, 1, 1, 0],
-                "group2_enriched": [1, 2, 2, 2, 2, 1, 0],
-                "conserved": [0, 0, 1, 1, 1, 1, 1],
+                "group1_enriched_kmer_coverage": [0, 1, 1, 1, 1, 1, 0],
+                "group2_enriched_kmer_coverage": [1, 2, 2, 2, 2, 1, 0],
+                "conserved_kmer_coverage": [0, 0, 1, 1, 1, 1, 1],
             },
-            index=[pos for pos in range(1, 8)],
+            index=pd.Index(
+                [pos for pos in range(1, 8)], name="reference_sequence_position"
+            ),
         )
 
     @pytest.mark.parametrize(

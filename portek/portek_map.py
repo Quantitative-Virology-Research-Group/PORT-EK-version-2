@@ -42,9 +42,11 @@ class MappingPipeline(BasePipeline):
     def _initialize_coverage_dataframe(self):
         self.matrices["coverage"] = pd.DataFrame(
             0,
-            columns=[f"{group}_enriched" for group in self.sample_groups]
-            + ["conserved"],
-            index=pd.RangeIndex(start=1, stop=len(self.ref_seq) + 1, step=1),
+            columns=[f"{group}_enriched_kmer_coverage" for group in self.sample_groups]
+            + ["conserved_kmer_coverage"],
+            index=pd.Index(
+                range(1, len(self.ref_seq) + 1), name="reference_sequence_position"
+            ),
         )
 
     def run_mapping(self, max_n_mismatch: int, verbose: bool = False) -> None:
@@ -258,7 +260,9 @@ class MappingPipeline(BasePipeline):
                     positions = [
                         pos for pos in range(start_position, start_position + self.k)
                     ]
-                    self.matrices["coverage"].loc[positions, group] += 1
+                    self.matrices["coverage"].loc[
+                        positions, f"{group}_kmer_coverage"
+                    ] += 1
 
     def save_mapping_and_coverage(self, max_n_mismatch: int) -> None:
         self.matrices["mapping"]["reference_sequence_position"] = self.matrices[
@@ -271,4 +275,5 @@ class MappingPipeline(BasePipeline):
         self.matrices["coverage"].to_csv(
             f"{self.project_dir}/output/coverage_{self.k}mers_max_{max_n_mismatch}_mismatches.tsv",
             sep="\t",
+            index_label="reference_sequence_position",
         )
