@@ -267,7 +267,7 @@ class MappingPipeline(BasePipeline):
     def save_mapping_and_coverage(self, max_n_mismatch: int) -> None:
         self.matrices["mapping"]["reference_sequence_position"] = self.matrices[
             "mapping"
-        ]["reference_sequence_position"].apply(lambda x: ",".join(map(str, x)))
+        ]["reference_sequence_position"].apply(lambda x: ", ".join(map(str, x)))
         self.matrices["mapping"].to_csv(
             f"{self.project_dir}/output/mapping_{self.k}mers_max_{max_n_mismatch}_mismatches.tsv",
             sep="\t",

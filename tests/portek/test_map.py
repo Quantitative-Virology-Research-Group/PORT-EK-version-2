@@ -333,7 +333,7 @@ class TestMappingPipelineMapping:
     def expected_mapping_df(self) -> pd.DataFrame:
         return pd.DataFrame(
             {
-                "reference_sequence_position": ["1,2", "2", "3"],
+                "reference_sequence_position": ["1, 2", "2", "3"],
                 "gene": ["gene1, gene2", "gene2", ""],
                 "number_of_mismatches": [1, 1, 0],
                 "group": [
@@ -535,7 +535,7 @@ class TestMappingPipelineMapping:
             index_col=0,
         ).fillna("")
 
-        assert saved_mapping_df.at["CGAAA", "reference_sequence_position"] == "35,154"
+        assert saved_mapping_df.at["CGAAA", "reference_sequence_position"] == "35, 154"
 
     def test_run_mapping(
         self,
