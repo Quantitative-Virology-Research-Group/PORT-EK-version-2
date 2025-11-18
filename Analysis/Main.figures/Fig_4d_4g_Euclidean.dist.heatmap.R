@@ -44,19 +44,19 @@ Execution.kmer.count.matrix.into.isolate.weight <- function(df) {
   df.rest <- df %>% dplyr::filter(subtype == "rest")
   
   df.A.output <- Execution.kmer.count.matrix(df.A) %>% dplyr::mutate(subtype = "A")
-  df.A.output$weight <- c((df.A.output$sum)/sum(df.A.output$sum))
+  df.A.output$distance <- c((df.A.output$sum)/sum(df.A.output$sum))
   
   df.B.output <- Execution.kmer.count.matrix(df.B) %>% dplyr::mutate(subtype = "B")
-  df.B.output$weight <- c((df.B.output$sum)/sum(df.B.output$sum))
+  df.B.output$distance <- c((df.B.output$sum)/sum(df.B.output$sum))
   
   df.C.output <- Execution.kmer.count.matrix(df.C) %>% dplyr::mutate(subtype = "C")
-  df.C.output$weight <- c((df.C.output$sum)/sum(df.C.output$sum))
+  df.C.output$distance <- c((df.C.output$sum)/sum(df.C.output$sum))
   
   df.D.output <- Execution.kmer.count.matrix(df.D) %>% dplyr::mutate(subtype = "D")
-  df.D.output$weight <- c((df.D.output$sum)/sum(df.D.output$sum))
+  df.D.output$distance <- c((df.D.output$sum)/sum(df.D.output$sum))
   
   df.rest.output <- Execution.kmer.count.matrix(df.rest) %>% dplyr::mutate(subtype = "rest")
-  df.rest.output$weight <- c((df.rest.output$sum)/sum(df.rest.output$sum))
+  df.rest.output$distance <- c((df.rest.output$sum)/sum(df.rest.output$sum))
   
   df.subtyps.output <- dplyr::bind_rows(df.A.output, df.B.output, df.C.output, df.D.output, df.rest.output)
   
@@ -66,9 +66,9 @@ Execution.kmer.count.matrix.into.isolate.weight <- function(df) {
 }
 
 Euclidean.heatmap.plot <- function(df, df.kmer) {
-  df <- df %>% dplyr::filter(subset == "1") %>% dplyr::select(isolate.x, weight) %>% dplyr::rename(isolate = isolate.x)
+  df <- df %>% dplyr::filter(subset == "1") %>% dplyr::select(isolate.x, distance) %>% dplyr::rename(isolate = isolate.x)
   
-  df.kmer.merge <- merge(df, df.kmer, by = "isolate") %>% dplyr::select(isolate, group, weight, kmer.count)
+  df.kmer.merge <- merge(df, df.kmer, by = "isolate") %>% dplyr::select(isolate, group, distance, kmer.count)
   
   df.kmer.merge.agg <- aggregate(. ~ isolate + group, df.kmer.merge, mean) %>% arrange(desc(isolate))
   
