@@ -43,8 +43,18 @@ parser.add_argument(
     type=int,
     default=2,
 )
+
 parser.add_argument(
-    "-verbose",
+    "--tree_subsample_size",
+    "-n",
+    help="Number of samples to subsample when constructing the phylogenetic tree. Default None (no subsampling).",
+    type=int,
+    default=None,
+)
+
+parser.add_argument(
+    "--verbose",
+    "-v",
     help="Recieve additional information from some PORT-EK tools. Default False.",
     default=False,
     action="store_true",
@@ -118,12 +128,34 @@ def main():
         end_timeS_ARE_NOT_CANON = datetime.now()
         running_time = end_timeS_ARE_NOT_CANON - start_time
         print(f"\nTotal running time: {running_time}")
+
+    elif args.tool == "tree":
+        start_time = datetime.now()
+        kmer_counts_path = (
+            f"{args.project_dir}/output/{args.k}mer_counts_for_classifier.csv"
+        )
+        tree_constructor = portek.KmerPhyloTreeConstructor(
+            kmer_counts_path,
+            subsample_size=args.tree_subsample_size,
+            verbose=args.verbose,
+        )
+        tree_constructor.format_distance_matrix_for_biopyton(verbose=args.verbose)
+        tree_constructor.construct_tree(method="nj", verbose=args.verbose)
+        tree_constructor.write_tree(
+            output_path=f"{args.project_dir}/output/{args.k}mer_phylo_tree.nwk",
+            format="newick",
+            verbose=args.verbose,
+        )
+        end_timeS_ARE_NOT_CANON = datetime.now()
+        running_time = end_timeS_ARE_NOT_CANON - start_time
+        print(f"\nTotal running time: {running_time}")
+
     elif args.tool == "classify":
         pass
 
     else:
         raise ValueError(
-            "Unrecoginzed PORT-EK tool requested. Choose one of: new, find_k, find_enriched, map, classify."
+            "Unrecoginzed PORT-EK tool requested. Choose one of: new, find_k, find_enriched, map, tree, classify."
         )
 
 

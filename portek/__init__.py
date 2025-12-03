@@ -11,3 +11,4 @@ from .portek_findk import KmerFinder
 from .portek_findk import FindOptimalKPipeline
 from .portek_enriched import EnrichedKmersPipeline
 from .portek_map import MappingPipeline
+from .portek_tree import KmerPhyloTreeConstructor
