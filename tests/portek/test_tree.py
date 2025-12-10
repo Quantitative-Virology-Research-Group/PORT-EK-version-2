@@ -41,6 +41,25 @@ class TestKmerPhyloTreeConstructorInit:
         assert n_rest == 6
         assert n_D == 8
 
+    def test_subsample_size_balanced(self):
+        subsample_size = 14
+        instance = KmerPhyloTreeConstructor(
+            "tests/test_data/test_counts.csv",
+            subsample_size=subsample_size,
+            balance_groups=True,
+        )
+        n_rest = len(
+            [name for name in instance.kmer_counts_df.index if name.startswith("rest_")]
+        )
+        n_D = len(
+            [name for name in instance.kmer_counts_df.index if name.startswith("D_")]
+        )
+        assert instance.kmer_counts_df.shape[0] == subsample_size
+        assert instance.kmer_counts_df.shape[1] == 28839
+        assert n_rest + n_D == subsample_size
+        assert n_rest == 7
+        assert n_D == 7
+
 
 class TestCalculateDistanceMatrix:
     def test_calculate_distance_matrix(

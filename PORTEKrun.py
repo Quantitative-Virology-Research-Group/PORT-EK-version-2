@@ -53,6 +53,13 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--balance_groups",
+    "-b",
+    help="Whether to balance groups when subsampling samples for the phylogenetic tree. Default False.",
+    action="store_true",
+)
+
+parser.add_argument(
     "--verbose",
     "-v",
     help="Recieve additional information from some PORT-EK tools. Default False.",
@@ -137,6 +144,7 @@ def main():
         tree_constructor = portek.KmerPhyloTreeConstructor(
             kmer_counts_path,
             subsample_size=args.tree_subsample_size,
+            balance_groups=args.balance_groups,
             verbose=args.verbose,
         )
         tree_constructor.format_distance_matrix_for_biopyton(verbose=args.verbose)

@@ -14,17 +14,30 @@ class KmerPhyloTreeConstructor:
         self,
         kmer_counts_path: str,
         subsample_size: int | None = None,
+        balance_groups: bool = False,
         verbose: bool = False,
     ) -> None:
         if verbose:
             print("Loading k-mer counts data...")
         self.kmer_counts_df = pd.read_csv(kmer_counts_path, index_col=0)
-
+        if verbose:
+            print(
+                f"Constructing phylogenetic tree from k-mer counts with {subsample_size} samples..."
+            )
         if subsample_size is not None:
             fraction = subsample_size / len(self.kmer_counts_df)
             self.kmer_counts_df = self.kmer_counts_df.groupby(
                 "sample_group", group_keys=False
-            ).sample(frac=fraction, random_state=42)
+            )
+            per_group_size = subsample_size // len(self.kmer_counts_df)
+            if balance_groups:
+                self.kmer_counts_df = self.kmer_counts_df.sample(
+                    n=per_group_size, random_state=42
+                )
+            else:
+                self.kmer_counts_df = self.kmer_counts_df.sample(
+                    frac=fraction, random_state=42
+                )
         self.kmer_counts_df = self.kmer_counts_df.drop(columns=["sample_group"])
         self.distance_matrix: list | None = None
         self.tree: Tree | None = None
