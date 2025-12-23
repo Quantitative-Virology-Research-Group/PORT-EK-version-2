@@ -63,7 +63,9 @@ subtype.kmer.count.mx.RNA.15.list <- lapply(subsets, function(i) {
 reshape.graph.matrix <- function(df) {
   df_ <- df %>% dplyr::select(id.x, id.y, sum) %>% filter(sum != 0)
   df.complete <- df_ %>% complete(id.x, id.y, fill = list(sum = 0))
+  #complete() allows to expand a data frame by generating all possible combinations of specified columns.
   df.wide <- dcast(df.complete, id.x ~ id.y, value.var = "sum", fun.aggregate = sum)
+  # Reshape data from long to wide format using dcast
   rownames(df.wide) <- df.wide$id.x
   df.wide$id.x <- NULL
   output.mx <- as.matrix(df.wide)
