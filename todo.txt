@@ -1,7 +1,0 @@
-classification in one module - portek_classify
-add max data frame memory size as a parameter
-fix warning and nan when min_k == max_k in PORTEK find_k
-clean up prints
-documentation
-tests
-trees
