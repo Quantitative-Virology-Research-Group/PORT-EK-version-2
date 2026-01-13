@@ -10,7 +10,7 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument(
     "tool",
-    help="Name of the PORT-EK function you want to execute. Choose one of: new, find_k, find_enriched, map, classify",
+    help="Name of the PORT-EK function you want to execute. Choose one of: new, find_k, find_enriched, map, tree",
 )
 
 parser.add_argument(
@@ -20,14 +20,14 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "-min_k",
+    "--min_k",
     help="Minimum k value to test with PORT-EK find_k. PORT-EK will test all odd k values from min_k up to and including max_k. Default 5.",
     type=int,
     default=5,
 )
 
 parser.add_argument(
-    "-max_k",
+    "--max_k",
     help="Maximum k value to test with PORT-EK find_k. PORT-EK will test all odd k values from min_k up to and including max_k. Default 31.",
     type=int,
     default=31,
@@ -68,7 +68,7 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "-n_jobs",
+    "--n_jobs",
     help="Number of processes used in PORT-EK find and PORT-EK enriched. Default 4.",
     default=4,
     type=int,
@@ -158,12 +158,9 @@ def main():
         running_time = end_timeS_ARE_NOT_CANON - start_time
         print(f"\nTotal running time: {running_time}")
 
-    elif args.tool == "classify":
-        pass
-
     else:
         raise ValueError(
-            "Unrecoginzed PORT-EK tool requested. Choose one of: new, find_k, find_enriched, map, tree, classify."
+            "Unrecoginzed PORT-EK tool requested. Choose one of: new, find_k, find_enriched, map, tree."
         )
 
 
