@@ -15,6 +15,7 @@ from Bio import SeqRecord, SeqIO, Seq
 import portek
 from portek.portek_utils import BasePipeline
 
+
 class EnrichedKmersPipeline(BasePipeline):
     """
     EnrichedKmersPipeline:
@@ -32,10 +33,12 @@ class EnrichedKmersPipeline(BasePipeline):
         self.err_cols = None
         self.p_cols = None
         self.matrices = {}
-        print(f"\nImported {len(self.kmer_set)} kmers and {len(self.sample_list)} samples.")
+        print(
+            f"\nImported {len(self.kmer_set)} kmers and {len(self.sample_list)} samples."
+        )
 
     def _filter_by_entropy_and_freq(
-        self, matrix: pd.DataFrame, min_F: float = None
+        self, matrix: pd.DataFrame, max_mem: int = 2
     ) -> pd.DataFrame:
         tot_samples = len(self.sample_list)
         matrix["F"] = matrix[self.c_cols].sum(axis=1) / tot_samples
@@ -50,8 +53,7 @@ class EnrichedKmersPipeline(BasePipeline):
                 ),
             )
 
-        if min_F == None:
-            min_F = 2 / tot_samples
+        min_F = 2 / tot_samples
         min_H = -(min_F * np.log2(min_F) + (1 - min_F) * np.log2(1 - min_F))
         common_kmer_matrix = matrix.loc[
             (matrix["H"] >= min_H) | (matrix["F"] >= (1 - min_F))
@@ -60,18 +62,18 @@ class EnrichedKmersPipeline(BasePipeline):
 
         print(f"{non_singles} {self.k}-mers passed the entropy filter.")
 
-        if non_singles * len(self.sample_list) > 2 * (2**30):
+        if non_singles * len(self.sample_list) > max_mem * (2**30):
             common_kmer_matrix = common_kmer_matrix[
                 ((common_kmer_matrix[self.freq_cols] > 0.1).sum(axis=1)) > 0
             ]
             print(
-                f"The resulting count matrix would take over 2 GB of memory. Removing additional {non_singles-len(common_kmer_matrix)} rare {self.k}-mers."
+                f"The resulting count matrix would take over {max_mem} GB of memory. Removing additional {non_singles-len(common_kmer_matrix)} rare {self.k}-mers."
             )
             print(f"{len(common_kmer_matrix)} {self.k}-mers remaining.")
 
         return common_kmer_matrix
 
-    def get_basic_kmer_stats(self, save_rare: bool = False):
+    def get_basic_kmer_stats(self, max_mem: int = 2) -> None:
         all_kmer_matrix = pd.DataFrame(
             0.0,
             index=self.kmer_set,
@@ -80,7 +82,8 @@ class EnrichedKmersPipeline(BasePipeline):
         ).sort_index()
 
         group_len_dict = {
-            f"{group}": len(self.sample_group_dict[group]) for group in self.sample_groups
+            f"{group}": len(self.sample_group_dict[group])
+            for group in self.sample_groups
         }
 
         in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
@@ -110,15 +113,8 @@ class EnrichedKmersPipeline(BasePipeline):
                 all_kmer_matrix[freq_col] * group_len_dict[group], 0
             )
 
-        common_kmer_matrix = self._filter_by_entropy_and_freq(all_kmer_matrix)
+        common_kmer_matrix = self._filter_by_entropy_and_freq(all_kmer_matrix, max_mem)
         self.matrices["common"] = common_kmer_matrix
-        if save_rare == True:
-            rare_kmer_matrix = all_kmer_matrix.loc[
-                all_kmer_matrix.index[
-                    ~all_kmer_matrix.index.isin(common_kmer_matrix.index)
-                ]
-            ]
-            self.matrices["rare"] = rare_kmer_matrix
 
     def _compare_group_pair(
         self, matrix_type: str, group1: str, group2: str, verbose: bool = False
@@ -146,6 +142,7 @@ class EnrichedKmersPipeline(BasePipeline):
             raise RuntimeError(
                 f"Error comparing groups {group1} and {group2}: {e}"
             ) from e
+
     def calc_kmer_stats(self, matrix_type: str, n_jobs: int = 4, verbose: bool = False):
         print(f"\nGetting {matrix_type} {self.k}-mer counts.")
         count_df = pd.DataFrame(
@@ -428,12 +425,9 @@ class EnrichedKmersPipeline(BasePipeline):
                 + list(itertools.chain(*zip(self.err_cols, self.p_cols)))
                 + ["RMSE", "group", "exclusivity"]
             )
-            df_to_save.loc[:, export_cols].to_csv(
-                out_filename, index_label="kmer"
-            )
+            df_to_save.loc[:, export_cols].to_csv(out_filename, index_label="kmer")
 
     # def save_enriched_kmers(self):
     #     kmers_to_save = self.matrices["enriched"].index.to_list()
     #     with open(f"{self.project_dir}/temp/enriched_{self.k}mers.pkl", mode="wb") as out_file:
     #         pickle.dump(kmers_to_save, out_file)
-   

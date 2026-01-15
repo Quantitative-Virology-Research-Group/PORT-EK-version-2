@@ -38,6 +38,14 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--max_mem",
+    "-m",
+    help="Maximum memory (in GB) size of the count matrix when calculating k-mer statistics in PORT-EK find_enriched. Rare k-mers will be removed if the matrix exceeds this size.find_ Default 2.",
+    type=int,
+    default=2,
+)
+
+parser.add_argument(
     "-d",
     help="Maximum edit distance when mapping k-mers to reference sequence. Default 2.",
     type=int,
@@ -113,7 +121,7 @@ def main():
     elif args.tool == "find_enriched":
         start_time = datetime.now()
         enriched_kmers_finder = portek.EnrichedKmersPipeline(args.project_dir, args.k)
-        enriched_kmers_finder.get_basic_kmer_stats()
+        enriched_kmers_finder.get_basic_kmer_stats(max_mem=args.max_mem)
         enriched_kmers_finder.calc_kmer_stats(
             "common", n_jobs=args.n_jobs, verbose=args.verbose
         )
