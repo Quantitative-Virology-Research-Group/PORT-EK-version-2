@@ -40,9 +40,9 @@ parser.add_argument(
 parser.add_argument(
     "--max_mem",
     "-m",
-    help="Maximum memory (in GB) size of the count matrix when calculating k-mer statistics in PORT-EK find_enriched. Rare k-mers will be removed if the matrix exceeds this size.find_ Default 2.",
-    type=int,
-    default=2,
+    help="Maximum memory (in GB) size of the count matrix when calculating k-mer statistics in PORT-EK find_enriched. Rare k-mers will be removed if the matrix exceeds this size. Default 2.0",
+    type=float,
+    default=2.0,
 )
 
 parser.add_argument(

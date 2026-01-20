@@ -38,7 +38,7 @@ class EnrichedKmersPipeline(BasePipeline):
         )
 
     def _filter_by_entropy_and_freq(
-        self, matrix: pd.DataFrame, max_mem: int = 2
+        self, matrix: pd.DataFrame, max_mem: float = 2.0
     ) -> pd.DataFrame:
         tot_samples = len(self.sample_list)
         matrix["F"] = matrix[self.c_cols].sum(axis=1) / tot_samples
