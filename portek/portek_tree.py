@@ -1,11 +1,9 @@
-from tabnanny import verbose
 from Bio.Phylo._io import write
 from Bio.Phylo import TreeConstruction
 from Bio.Phylo.BaseTree import Tree
 import numpy as np
 import pandas as pd
 from scipy.spatial import distance
-from sklearn.decomposition import PCA
 
 
 class KmerPhyloTreeConstructor:

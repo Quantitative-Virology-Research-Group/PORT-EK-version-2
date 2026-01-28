@@ -1,16 +1,14 @@
-import os
-import pathlib
-import yaml
-import pickle
-import multiprocessing
 import itertools
+import multiprocessing
+import pathlib
+import pickle
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from sklearn import decomposition
-from Bio import SeqRecord, SeqIO, Seq
 
 import portek
 from portek.portek_utils import BasePipeline

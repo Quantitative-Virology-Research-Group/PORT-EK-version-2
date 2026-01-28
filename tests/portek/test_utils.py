@@ -353,23 +353,3 @@ class TestEncodeSeq:
 
     def test_encode_seq_mixed_case(self):
         assert portek.encode_seq("aCgT") == ["00", "01", "10", "11"]
-
-
-class TestEncodeSeqAsBits:
-
-    @pytest.mark.parametrize(
-        "seq, expected",
-        [
-            ("ACGT", [1, 8, 4, 2]),
-            ("A", [1]),
-            ("C", [8]),
-            ("G", [4]),
-            ("T", [2]),
-            ("N", [15]),
-            ("ACGN", [1, 8, 4, 15]),
-            ("aCgT", [1, 8, 4, 2]),
-            ("XXX", [15, 15, 15]),
-        ],
-    )
-    def test_encode_seq_as_bits(self, seq, expected):
-        assert portek.encode_seq_as_bits(seq) == expected

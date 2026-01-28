@@ -1,11 +1,9 @@
 import os
 import pathlib
-import yaml
 import pickle
 import multiprocessing
 import numpy as np
 import pandas as pd
-from collections import defaultdict
 from time import process_time
 from Bio import SeqIO
 
