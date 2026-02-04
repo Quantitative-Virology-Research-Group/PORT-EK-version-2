@@ -3,6 +3,7 @@
 ## Requirements
 
 PORTEK requires **Python 3.12 or higher**.
+Make sure you are in PORTEK directory when creating the virtual environment and installing the package.
 
 ### Checking your Python version
 ```bash
