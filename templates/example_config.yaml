@@ -1,0 +1,45 @@
+sample_groups: [A, B, C, D, rest] #Fill with comma separated list of group names, must be identical to the groups in generate_kmers.sh script, case sensitive.
+input_files: [A.fasta, B.fasta, C.fasta, D.fasta, rest.fasta] #Fill with comma separated list of fasta files with input sequences. There should be one file per group and the order must match with sample_groups.
+header_format: [] #Optionally, fill with comma separated list of header formats of fasta files above. Accepts values of "gisaid", "ncbi" or "plain". If left empty assumes "plain" for all groups.
+mode: ava #"ava" or "ovr" for all vs all or one vs rest comparison. If ovr, input the group of interest in the next line
+goi: #Define group of interest for ovr mode.
+ref_seq: HXB2.fasta #Name of fasta file containing reference genomic sequence, if used. The file should be placed in $project_dir/input.
+ref_genes:
+  - gene: 5'LTR
+    start: 1
+    end: 634
+  - gene: gag
+    start: 790
+    end: 2292
+  - gene: pol
+    start: 2358
+    end: 5096
+  - gene: vif
+    start: 5041
+    end: 5619
+  - gene: vpr
+    start: 5559
+    end: 5795
+  - gene: tat
+    start: 
+      - 5831
+      - 8379
+    end: 
+      - 6045
+      - 8424
+  - gene: rev
+    start:
+      - 5970
+      - 8379
+    end: 
+      - 6045
+      - 8653
+  - gene: env
+    start: 6225
+    end: 8795
+  - gene: nef
+    start: 8797
+    end: 9168
+  - gene: 3'LTR
+    start: 9086
+    end: 9719
