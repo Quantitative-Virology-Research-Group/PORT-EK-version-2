@@ -1,0 +1,1 @@
+Folder contains input RNA sequences used in this work. RNA sequences were retrieved from the Los Alamos National Laboratory HIV Databases. The genome ID corresponding to each sequence and sequences that do not pass the quality control are provided in separate Excel files.
