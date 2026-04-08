@@ -115,7 +115,12 @@ class EnrichedKmersPipeline(BasePipeline):
         self.matrices["common"] = common_kmer_matrix
 
     def _compare_group_pair(
-        self, matrix_type: str, group1: str, group2: str, verbose: bool = False
+        self,
+        matrix_type: str,
+        group1: str,
+        group2: str,
+        verbose: bool = False,
+        false_discovery_control: bool = False,
     ) -> tuple[str, str, pd.Series, pd.Series, pd.Series]:
         try:
             if verbose == True:
@@ -131,6 +136,8 @@ class EnrichedKmersPipeline(BasePipeline):
                 ).pvalue,
                 axis=1,
             )
+            if false_discovery_control == True:
+                p_values = stats.false_discovery_control(p_values, method="by")
             with np.errstate(divide="ignore"):
                 log_p_values = -np.log10(p_values)
             if verbose == True:
@@ -141,7 +148,13 @@ class EnrichedKmersPipeline(BasePipeline):
                 f"Error comparing groups {group1} and {group2}: {e}"
             ) from e
 
-    def calc_kmer_stats(self, matrix_type: str, n_jobs: int = 4, verbose: bool = False):
+    def calc_kmer_stats(
+        self,
+        matrix_type: str,
+        n_jobs: int = 4,
+        verbose: bool = False,
+        false_discovery_control: bool = False,
+    ) -> None:
         print(f"\nGetting {matrix_type} {self.k}-mer counts.")
         count_df = pd.DataFrame(
             0,
@@ -186,6 +199,7 @@ class EnrichedKmersPipeline(BasePipeline):
                             self.sample_groups[i],
                             self.sample_groups[j],
                             verbose,
+                            false_discovery_control,
                         )
                     )
 
@@ -236,6 +250,7 @@ class EnrichedKmersPipeline(BasePipeline):
                         self.goi,
                         group,
                         verbose,
+                        false_discovery_control,
                     )
                 )
 
