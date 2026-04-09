@@ -14,7 +14,10 @@ class MappingPipeline(BasePipeline):
         super().__init__(project_dir, k)
         self.kmer_index = {}
         self.matrices = {}
-
+        if self.ref_seq_name == "":
+            raise ValueError(
+                "No reference sequence defined in config! Please add a reference sequence to the config to run mapping!"
+            )
         try:
             self.matrices["enriched"] = pd.read_csv(
                 f"{project_dir}/output/enriched_{self.k}mers_stats.csv", index_col=0

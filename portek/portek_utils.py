@@ -44,18 +44,22 @@ class BasePipeline:
             else:
                 err_msg = "Unrecognized analysis mode, should by ava or ovr. Check your config file!"
                 raise ValueError()
-            self.ref_seq_name = ".".join(config["ref_seq"].split(".")[:-1])
-            try:
-                self.ref_seq = str(
-                    SeqIO.read(
-                        f"{project_dir}/input/{config['ref_seq']}", format="fasta"
-                    ).seq
-                )
-            except ValueError:
-                err_msg = (
-                    "Missing reference sequence file or the file has incorrect format!"
-                )
-                raise ValueError()
+
+            if config.get("ref_seq") is not None:
+                try:
+                    self.ref_seq_name = ".".join(config["ref_seq"].split(".")[:-1])
+                    self.ref_seq = str(
+                        SeqIO.read(
+                            f"{project_dir}/input/{config['ref_seq']}", format="fasta"
+                        ).seq
+                    )
+                except ValueError:
+                    err_msg = "Missing reference sequence file or the file has incorrect format!"
+                    raise ValueError()
+            else:
+                self.ref_seq_name = ""
+                self.ref_seq = ""
+
             try:
                 self.ref_genes = config["ref_genes"]
             except KeyError:
