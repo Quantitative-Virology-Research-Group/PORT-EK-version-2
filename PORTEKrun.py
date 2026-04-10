@@ -109,9 +109,11 @@ def main():
     elif args.tool == "find_k":
         start_time = datetime.now()
         kmer_finder = portek.KmerFinder(args.project_dir, args.min_k, args.max_k)
-        times = kmer_finder.find_all_kmers(n_jobs=args.n_jobs, verbose=args.verbose)
+        times, avg_seq_len = kmer_finder.find_all_kmers(
+            n_jobs=args.n_jobs, verbose=args.verbose
+        )
         optimal_k_finder = portek.FindOptimalKPipeline(
-            args.project_dir, args.min_k, args.max_k, times
+            args.project_dir, args.min_k, args.max_k, times, avg_seq_len
         )
         optimal_k_finder.find_optimal_k(n_jobs=args.n_jobs, verbose=args.verbose)
         end_timeS_ARE_NOT_CANON = datetime.now()

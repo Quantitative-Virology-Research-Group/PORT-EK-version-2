@@ -50,7 +50,7 @@ class KmerFinder(BasePipeline):
     def _unknown_nuc(self):
         return "X"
 
-    def _find_kmers(self, k: int, group: str, seq_list: int, verbose: bool = False):
+    def _find_kmers(self, k: int, group: str, seq_list: list, verbose: bool = False):
         start_time = process_time()
         if verbose == True:
             print(f"Finding all {k}-mers in {group} sequences.", flush=True)
@@ -121,7 +121,9 @@ class KmerFinder(BasePipeline):
 
         return (k, process_time() - start_time)
 
-    def find_all_kmers(self, n_jobs: int = 4, verbose: bool = False):
+    def find_all_kmers(
+        self, n_jobs: int = 4, verbose: bool = False
+    ) -> tuple[dict, np.floating]:
         print(
             f"Finding all k-mers of lengths {self.mink} to {self.maxk} in {len(self.sample_groups)} files.",
             flush=True,
@@ -143,10 +145,17 @@ class KmerFinder(BasePipeline):
 
         print("Done finding all k-mers!")
 
-        time_dict = {k: 0 for k in k_to_test}
+        time_dict = {k: 0.0 for k in k_to_test}
         for time in times:
             time_dict[time[0]] += time[1]
-        return time_dict
+
+        avg_seq_len = np.mean(
+            [len(seq) for seq_list in self.seq_lists for seq in seq_list]
+        )
+        if verbose == True:
+            print(f"Average sequence length: {avg_seq_len}")
+
+        return time_dict, avg_seq_len
 
 
 class FindOptimalKPipeline(BasePipeline):
@@ -154,120 +163,68 @@ class FindOptimalKPipeline(BasePipeline):
     FindOptimalKPipeline:
     """
 
-    def __init__(self, project_dir: str, mink: int, maxk: int, times) -> None:
+    def __init__(
+        self, project_dir: str, mink: int, maxk: int, times: dict, avg_seq_len: float
+    ) -> None:
         super().check_min_max_k(mink, maxk)
         super().__init__(project_dir)
 
         self.times = times
-        self.avg_cols = [f"{group}_avg" for group in self.sample_groups]
-        self.freq_cols = [f"{group}_freq" for group in self.sample_groups]
-        self.c_cols = [f"{group}_c" for group in self.sample_groups]
-        self.f_cols = [f"{group}_f" for group in self.sample_groups]
+        self.avg_seq_len = avg_seq_len
 
     def _calc_metrics(self, k: int, verbose: bool = False):
 
         start_time = process_time()
+
         if verbose == True:
             print(f"Calculating metrics for {k}-mers.", flush=True)
-        kmer_set = super().load_kmer_set(k)
+
+        total_kmer_num = self.avg_seq_len - k + 1
+        all_kmer_num = 4**k
+        kmer_uniqueness_prob = np.exp(-1 * total_kmer_num**2 / (2 * all_kmer_num))
+        spec = kmer_uniqueness_prob
+
         sample_list = super().load_sample_list()
+        tot_samples = len(sample_list)
 
-        all_kmer_stat_matrix = pd.DataFrame(
-            0.0,
-            index=kmer_set,
-            columns=[col for col in self.freq_cols] + [col for col in self.avg_cols],
-            dtype=np.float64,
-        )
-
-        group_sample_dict = {
-            f"{group}": [
-                sample for sample in sample_list if sample.split("_")[0] == f"{group}"
-            ]
+        group_len_dict = {
+            group: sum(1 for s in sample_list if s.split("_")[0] == group)
             for group in self.sample_groups
         }
 
-        group_len_dict = {
-            f"{group}": len(group_sample_dict[group]) for group in self.sample_groups
-        }
-        tot_samples = len(sample_list)
-
-        in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
-            f"{k}mer_*_avg_dict.pkl"
-        )
-        for filename in in_path:
-            with open(filename, mode="rb") as in_file:
-                temp_dict = pickle.load(in_file)
-            column_name = "_".join(filename.stem.split("_")[1:-1])
-            all_kmer_stat_matrix[column_name] = temp_dict
-
+        # H(F) >= H(2/N)  iff  2 <= count <= N-2, so skip entropy entirely
+        # and just count kmers in that range using the freq_dicts directly.
+        total_counts: dict[int, int] = {}
         in_path = pathlib.Path(f"{self.project_dir}/input/indices/").glob(
             f"{k}mer_*_freq_dict.pkl"
         )
         for filename in in_path:
+            group = filename.stem.split("_")[1]
+            group_size = group_len_dict[group]
             with open(filename, mode="rb") as in_file:
-                temp_dict = pickle.load(in_file)
-            column_name = "_".join(filename.stem.split("_")[1:-1])
-            all_kmer_stat_matrix[column_name] = temp_dict
+                freq_dict: dict = pickle.load(in_file)
+            for kmer, freq in freq_dict.items():
+                total_counts[kmer] = total_counts.get(kmer, 0) + round(
+                    freq * group_size
+                )
 
-        all_kmer_stat_matrix = all_kmer_stat_matrix.fillna(0.0)
+        tot_kmer = len(total_counts)
+        sig_kmer = sum(1 for c in total_counts.values() if 2 <= c <= tot_samples - 2)
 
-        for c_col, freq_col, group in zip(
-            self.c_cols, self.freq_cols, self.sample_groups
-        ):
-            all_kmer_stat_matrix[c_col] = round(
-                all_kmer_stat_matrix[freq_col] * group_len_dict[group], 0
-            )
-
-        all_kmer_stat_matrix["F"] = (
-            all_kmer_stat_matrix[self.c_cols].sum(axis=1) / tot_samples
-        )
-
-        with np.errstate(divide="ignore"):
-            all_kmer_stat_matrix["H"] = np.where(
-                all_kmer_stat_matrix["F"] == 1,
-                0,
-                -(
-                    all_kmer_stat_matrix["F"] * np.log2(all_kmer_stat_matrix["F"])
-                    + (1 - all_kmer_stat_matrix["F"])
-                    * np.log2(1 - all_kmer_stat_matrix["F"])
-                ),
-            )
-        min_F = 2 / tot_samples
-        min_H = -(min_F * np.log2(min_F) + (1 - min_F) * np.log2(1 - min_F))
-        tot_kmer = len(all_kmer_stat_matrix)
-        all_kmer_stat_matrix = all_kmer_stat_matrix.loc[
-            all_kmer_stat_matrix["H"] >= min_H
-        ]
-        sig_kmer = len(all_kmer_stat_matrix)
         if verbose == True:
+            min_F = 2 / tot_samples
+            min_H = -(min_F * np.log2(min_F) + (1 - min_F) * np.log2(1 - min_F))
             print(
                 f"{sig_kmer} of {tot_kmer} {k}-mers left after filtering with entropy threshold of {min_H}.",
                 flush=True,
             )
-        all_kmer_stat_matrix["unique"] = 0
-        for kmer in all_kmer_stat_matrix.index:
-            if all(
-                [
-                    all_kmer_stat_matrix.loc[kmer, avg_col]
-                    - all_kmer_stat_matrix.loc[kmer, freq_col]
-                    == 0
-                    for avg_col, freq_col in zip(self.avg_cols, self.freq_cols)
-                ]
-            ):
-                all_kmer_stat_matrix.loc[kmer, "unique"] = 1
-        unique_kmer = len(all_kmer_stat_matrix.loc[all_kmer_stat_matrix["unique"] == 1])
 
-        try:
-            spec = unique_kmer / sig_kmer
-        except ZeroDivisionError:
-            spec = 0
         dt = process_time() - start_time
-        mem = float(f"{np.mean(all_kmer_stat_matrix['H']):.2g}")
 
         if verbose == True:
             print(f"Done calculating metrics for {k}-mers.", flush=True)
 
-        return k, spec, mem, dt, sig_kmer
+        return k, spec, dt, sig_kmer
 
     def find_optimal_k(self, n_jobs: int = 4, verbose: bool = False):
         print("Finding optimal k.")
@@ -279,16 +236,15 @@ class FindOptimalKPipeline(BasePipeline):
         result_df = pd.DataFrame(
             0,
             index=range(self.mink, self.maxk + 1, 2),
-            columns=["spec", "mem", "dt", "spec_rank", "mem_rank", "dt_rank", "score"],
+            columns=["spec", "dt"],
             dtype=float,
         )
 
         for result in results:
             if result != None:
-                if result[4] >= 100:
-                    result_df.loc[result[0], "mem"] = result[2]
-                    result_df.loc[result[0], "spec"] = round(result[1] * 100)
-                    result_df.loc[result[0], "dt"] = result[3]
+                if result[3] >= 100:
+                    result_df.loc[result[0], "spec"] = result[1]
+                    result_df.loc[result[0], "dt"] = result[2]
                 else:
                     result_df = result_df.drop(labels=[result[0]])
                     print(
@@ -300,7 +256,10 @@ class FindOptimalKPipeline(BasePipeline):
                 result_df.loc[k, "dt"] += time
         result_df["dt"] = result_df["dt"].round(3)
         result_df.sort_index(inplace=True)
-        result_df["diff"] = result_df["spec"].diff(periods=-1)
+
+        distances = self._get_distances_to_line(result_df)
+        best_k = result_df.index[np.argmax(distances)]
+
         if len(result_df) == 0:
             print(
                 "\nNo value of k resulted in more than 100 k-mers passing the entropy filter!"
@@ -313,9 +272,8 @@ class FindOptimalKPipeline(BasePipeline):
             out_file.write(f"\nHere are the results of optimal k selection:\n")
             for k in result_df.index:
                 out_file.write(
-                    f"\nk: {k}, Unique kmers: {result_df.loc[k,'spec']}%, average k-mer entropy: {result_df.loc[k,'mem']}, CPU time {result_df.loc[k,'dt']} s."
+                    f"\nk: {k}, Expected probability of unique random {k}-mers: {round(result_df.loc[k,'spec']*100, 2)}%, CPU time {result_df.loc[k,'dt']} s."
                 )
-            best_k = result_df.idxmax()["diff"]
             out_file.write(
                 f"\n\nPORT-EK thinks k value of {best_k} is the best for your data!"
             )
@@ -328,3 +286,21 @@ class FindOptimalKPipeline(BasePipeline):
                 lines = out_file.readlines()
                 tail = lines[:3] + lines[-2:]
                 print(*tail)
+
+    def _get_distances_to_line(self, result_df: pd.DataFrame) -> np.ndarray:
+        x = np.array(result_df.index, dtype=float)
+        y = result_df["spec"].values
+        x_n = (x - x[0]) / (x[-1] - x[0])
+        y_n = (y - y.min()) / (y.max() - y.min()) if y.max() != y.min() else y
+
+        dx, dy = x_n[-1] - x_n[0], y_n[-1] - y_n[0]
+        distances = np.abs(
+            dy * x_n
+            - dx * y_n
+            + x_n[-1] * y_n[0]
+            - dx * y_n
+            + x_n[-1] * y_n[0]
+            - x_n[0] * y_n[-1]
+        ) / np.sqrt(dx**2 + dy**2)
+
+        return distances
