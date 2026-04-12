@@ -89,7 +89,7 @@ Logistic.Regression.Kmer.count <- function(df) {
   # 1. feature selection
   df.kmer.type <- df %>% dplyr::select(kmer.type, kmer.average.count, RMSE, kmer.weight) 
   df.kmer.type$kmer.type <- as.factor(df.kmer.type$kmer.type)
-  df.kmer.type$kmer.kmer.count <- as.numeric(df.kmer.type$kmer.count)
+  df.kmer.type$kmer.count <- as.numeric(df.kmer.type$kmer.count)
   
   df.kmer.type.b <- sample_n(df.kmer.type, 1000, replace = T)
   
