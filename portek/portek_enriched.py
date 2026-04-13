@@ -391,8 +391,8 @@ class EnrichedKmersPipeline(BasePipeline):
         fig, ax = plt.subplots()
         fig.tight_layout()
         ax.set_title("PCA of k-mer counts")
-        ax.set_xlabel("Principal component 1")
-        ax.set_ylabel("Principal component 2")
+        ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]*100:.1f}%)")
+        ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]*100:.1f}%)")
         sns.scatterplot(x=X_PCA[:, 0], y=X_PCA[:, 1], hue=y_names, s=20, linewidth=0)
         plt.savefig(
             f"{self.project_dir}/output/{self.k}mer_PCA.svg",
