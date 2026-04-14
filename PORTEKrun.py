@@ -46,6 +46,12 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--fdr",
+    help="Use false discovery rate to control for when calculating k-mer statistics in PORT-EK find_enriched.",
+    action="store_true",
+)
+
+parser.add_argument(
     "-d",
     help="Maximum edit distance when mapping k-mers to reference sequence. Default 2.",
     type=int,
@@ -125,7 +131,10 @@ def main():
         enriched_kmers_finder = portek.EnrichedKmersPipeline(args.project_dir, args.k)
         enriched_kmers_finder.get_basic_kmer_stats(max_mem=args.max_mem)
         enriched_kmers_finder.calc_kmer_stats(
-            "common", n_jobs=args.n_jobs, verbose=args.verbose
+            "common",
+            n_jobs=args.n_jobs,
+            verbose=args.verbose,
+            false_discovery_control=args.fdr,
         )
         enriched_kmers_finder.plot_volcanos("common")
         enriched_kmers_found = enriched_kmers_finder.get_enriched_kmers()
@@ -133,7 +142,7 @@ def main():
             enriched_kmers_finder.save_counts_for_classifier()
             enriched_kmers_finder.save_matrix("enriched")
             enriched_kmers_finder.plot_PCA()
-            # enriched_kmers_finder.save_enriched_kmers()
+            enriched_kmers_finder.plot_UMAP()
         end_timeS_ARE_NOT_CANON = datetime.now()
         running_time = end_timeS_ARE_NOT_CANON - start_time
         print(f"\nTotal running time: {running_time}")

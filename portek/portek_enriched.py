@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from sklearn import decomposition
+import umap
 
 import portek
 from portek.portek_utils import BasePipeline
@@ -138,6 +139,10 @@ class EnrichedKmersPipeline(BasePipeline):
             )
             if false_discovery_control == True:
                 p_values = stats.false_discovery_control(p_values, method="by")
+                if verbose == True:
+                    print(
+                        f"Applied Benjamini-Yekutieli false discovery control to p-values for groups {group1} and {group2}."
+                    )
             with np.errstate(divide="ignore"):
                 log_p_values = -np.log10(p_values)
             if verbose == True:
@@ -396,6 +401,26 @@ class EnrichedKmersPipeline(BasePipeline):
         sns.scatterplot(x=X_PCA[:, 0], y=X_PCA[:, 1], hue=y_names, s=20, linewidth=0)
         plt.savefig(
             f"{self.project_dir}/output/{self.k}mer_PCA.svg",
+            dpi=600,
+            format="svg",
+            bbox_inches="tight",
+        )
+
+    def plot_UMAP(self):
+        print(f"\nPlotting and saving UMAP plot of enriched {self.k}-mers.")
+        reducer = umap.UMAP(n_components=2)
+        X_UMAP = reducer.fit_transform(
+            self.matrices["counts"].drop("sample_group", axis=1)
+        )
+        y_names = self.matrices["counts"]["sample_group"]
+        fig, ax = plt.subplots()
+        fig.tight_layout()
+        ax.set_title("UMAP of k-mer counts")
+        ax.set_xlabel("UMAP1")
+        ax.set_ylabel("UMAP2")
+        sns.scatterplot(x=X_UMAP[:, 0], y=X_UMAP[:, 1], hue=y_names, s=20, linewidth=0)
+        plt.savefig(
+            f"{self.project_dir}/output/{self.k}mer_UMAP.svg",
             dpi=600,
             format="svg",
             bbox_inches="tight",
