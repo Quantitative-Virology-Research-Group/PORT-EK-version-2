@@ -46,6 +46,13 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--min_freq",
+    help="Minimum frequency of k-mers to keep when calculating k-mer statistics in PORT-EK find_enriched. K-mers with frequency below this threshold will be removed ONLY if k-mer matrix exceeds the maximum memory size. Default 0.1 (10%).",
+    type=float,
+    default=0.1,
+)
+
+parser.add_argument(
     "--fdr",
     help="Use false discovery rate to control for when calculating k-mer statistics in PORT-EK find_enriched.",
     action="store_true",
@@ -129,7 +136,9 @@ def main():
     elif args.tool == "find_enriched":
         start_time = datetime.now()
         enriched_kmers_finder = portek.EnrichedKmersPipeline(args.project_dir, args.k)
-        enriched_kmers_finder.get_basic_kmer_stats(max_mem=args.max_mem)
+        enriched_kmers_finder.get_basic_kmer_stats(
+            max_mem=args.max_mem, min_freq=args.min_freq
+        )
         enriched_kmers_finder.calc_kmer_stats(
             "common",
             n_jobs=args.n_jobs,
@@ -142,7 +151,6 @@ def main():
             enriched_kmers_finder.save_counts_for_classifier()
             enriched_kmers_finder.save_matrix("enriched")
             enriched_kmers_finder.plot_PCA()
-            enriched_kmers_finder.plot_UMAP()
         end_timeS_ARE_NOT_CANON = datetime.now()
         running_time = end_timeS_ARE_NOT_CANON - start_time
         print(f"\nTotal running time: {running_time}")

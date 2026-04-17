@@ -1,5 +1,5 @@
+import concurrent.futures
 import itertools
-import multiprocessing
 import pathlib
 import pickle
 
@@ -37,7 +37,7 @@ class EnrichedKmersPipeline(BasePipeline):
         )
 
     def _filter_by_entropy_and_freq(
-        self, matrix: pd.DataFrame, max_mem: float = 2.0
+        self, matrix: pd.DataFrame, max_mem: float = 2.0, min_freq: float = 0.1
     ) -> pd.DataFrame:
         tot_samples = len(self.sample_list)
         matrix["F"] = matrix[self.c_cols].sum(axis=1) / tot_samples
@@ -63,7 +63,7 @@ class EnrichedKmersPipeline(BasePipeline):
 
         if non_singles * len(self.sample_list) > max_mem * (2**30):
             common_kmer_matrix = common_kmer_matrix[
-                ((common_kmer_matrix[self.freq_cols] > 0.1).sum(axis=1)) > 0
+                ((common_kmer_matrix[self.freq_cols] > min_freq).sum(axis=1)) > 0
             ]
             print(
                 f"The resulting count matrix would take over {max_mem} GB of memory. Removing additional {non_singles-len(common_kmer_matrix)} rare {self.k}-mers."
@@ -72,7 +72,7 @@ class EnrichedKmersPipeline(BasePipeline):
 
         return common_kmer_matrix
 
-    def get_basic_kmer_stats(self, max_mem: int = 2) -> None:
+    def get_basic_kmer_stats(self, max_mem: int = 2, min_freq: float = 0.1) -> None:
         all_kmer_matrix = pd.DataFrame(
             0.0,
             index=self.kmer_set,
@@ -112,7 +112,9 @@ class EnrichedKmersPipeline(BasePipeline):
                 all_kmer_matrix[freq_col] * group_len_dict[group], 0
             )
 
-        common_kmer_matrix = self._filter_by_entropy_and_freq(all_kmer_matrix, max_mem)
+        common_kmer_matrix = self._filter_by_entropy_and_freq(
+            all_kmer_matrix, max_mem, min_freq
+        )
         self.matrices["common"] = common_kmer_matrix
 
     def _compare_group_pair(
@@ -122,30 +124,39 @@ class EnrichedKmersPipeline(BasePipeline):
         group2: str,
         verbose: bool = False,
         false_discovery_control: bool = False,
+        chunk_size: int = 2000,
     ) -> tuple[str, str, pd.Series, pd.Series, pd.Series]:
         try:
-            if verbose == True:
+            if verbose:
                 print(f"Calculating differences for groups {group1} and {group2}.")
+            kmer_index = self.matrices[matrix_type].index
             avg_counts_i = self.matrices[matrix_type][f"{group1}_avg"]
             avg_counts_j = self.matrices[matrix_type][f"{group2}_avg"]
             errors = avg_counts_i - avg_counts_j
             group1_samples = self.sample_group_dict[group1]
             group2_samples = self.sample_group_dict[group2]
-            p_values = self.matrices[matrix_type].apply(
-                lambda row: stats.mannwhitneyu(
-                    row[group1_samples], row[group2_samples]
-                ).pvalue,
-                axis=1,
-            )
-            if false_discovery_control == True:
-                p_values = stats.false_discovery_control(p_values, method="by")
-                if verbose == True:
+            g1_data = self.matrices[matrix_type][group1_samples].to_numpy()
+            g2_data = self.matrices[matrix_type][group2_samples].to_numpy()
+            n_kmers = g1_data.shape[0]
+            p_vals = np.empty(n_kmers, dtype=np.float64)
+            for start in range(0, n_kmers, chunk_size):
+                end = min(start + chunk_size, n_kmers)
+                p_vals[start:end] = stats.mannwhitneyu(
+                    g1_data[start:end], g2_data[start:end], axis=1
+                ).pvalue
+            p_values = pd.Series(p_vals, index=kmer_index)
+            if false_discovery_control:
+                p_values = pd.Series(
+                    stats.false_discovery_control(p_values, method="by"),
+                    index=kmer_index,
+                )
+                if verbose:
                     print(
                         f"Applied Benjamini-Yekutieli false discovery control to p-values for groups {group1} and {group2}."
                     )
             with np.errstate(divide="ignore"):
-                log_p_values = -np.log10(p_values)
-            if verbose == True:
+                log_p_values = pd.Series(-np.log10(p_values), index=kmer_index)
+            if verbose:
                 print(f"Done calculating differences for groups {group1} and {group2}.")
             return group1, group2, errors, p_values, log_p_values
         except Exception as e:
@@ -159,43 +170,59 @@ class EnrichedKmersPipeline(BasePipeline):
         n_jobs: int = 4,
         verbose: bool = False,
         false_discovery_control: bool = False,
+        mwu_chunk_size: int = 2000,
     ) -> None:
         print(f"\nGetting {matrix_type} {self.k}-mer counts.")
-        count_df = pd.DataFrame(
-            0,
-            index=self.matrices[matrix_type].index,
-            columns=self.sample_list,
-            dtype="uint8",
+        kmer_index = self.matrices[matrix_type].index
+        filenames = sorted(
+            pathlib.Path(f"{self.project_dir}/input/indices/{self.k}mers").glob(
+                "*_count.pkl"
+            )
         )
+        tot_files = len(filenames)
+
+        # Pre-allocate the exact final shape — no intermediate union of all k-mers
+        count_array = np.zeros((len(kmer_index), len(self.sample_list)), dtype=np.uint8)
+        kmer_to_row = {kmer: i for i, kmer in enumerate(kmer_index)}
+        sample_to_col = {name: j for j, name in enumerate(self.sample_list)}
+
+        def _fill_column(filename):
+            with open(filename, mode="rb") as f:
+                d = pickle.load(f)
+            name = "_".join(filename.stem.split("_")[:-1])
+            col = sample_to_col.get(name)
+            if col is None:
+                return
+            rows, vals = [], []
+            for k, v in d.items():
+                row = kmer_to_row.get(k)
+                if row is not None:
+                    rows.append(row)
+                    vals.append(v)
+            if rows:
+                count_array[rows, col] = vals
+
+        loaded = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n_jobs) as executor:
+            for _ in executor.map(_fill_column, filenames):
+                loaded += 1
+                if verbose:
+                    print(
+                        f"Loaded {self.k}-mers from {loaded} of {tot_files} samples.",
+                        end="\r",
+                        flush=True,
+                    )
+
+        count_df = pd.DataFrame(count_array, index=kmer_index, columns=self.sample_list)
         self.matrices[matrix_type] = pd.concat(
             [count_df, self.matrices[matrix_type]], axis=1
         )
-        if verbose == True:
-            counter = 1
-            tot_files = len(self.sample_list)
-        in_path = pathlib.Path(f"{self.project_dir}/input/indices/{self.k}mers").glob(
-            "*_count.pkl"
-        )
-        for filename in in_path:
-            with open(filename, mode="rb") as in_file:
-                temp_dict = pickle.load(in_file)
-            sample_name = "_".join(filename.stem.split("_")[:-1])
-            count_dict = {f"{sample_name}": temp_dict.values()}
-            temp_df = pd.DataFrame(count_dict, index=temp_dict.keys(), dtype="uint8")
-            self.matrices[matrix_type].update(temp_df)
-            if verbose == True:
-                print(
-                    f"Loaded {self.k}-mers from {counter} of {tot_files} samples.",
-                    end="\r",
-                    flush=True,
-                )
-                counter += 1
         print(f"\nIdentifying enriched {self.k}-mers.")
 
         if self.mode == "ava":
-            group_pairs = []
             err_cols = []
             p_cols = []
+            group_pairs = []
             for j in range(1, len(self.sample_groups)):
                 for i in range(j):
                     group_pairs.append(
@@ -205,34 +232,34 @@ class EnrichedKmersPipeline(BasePipeline):
                             self.sample_groups[j],
                             verbose,
                             false_discovery_control,
+                            mwu_chunk_size,
                         )
                     )
 
-            with multiprocessing.get_context("forkserver").Pool(n_jobs) as pool:
-                try:
-                    results = pool.starmap(
-                        self._compare_group_pair, group_pairs, chunksize=1
-                    )
-                except Exception as e:
-                    print(f"An error occurred during multiprocessing: {e}")
-                    raise
+            results = [self._compare_group_pair(*args) for args in group_pairs]
 
+            new_cols = {}
             for result in results:
                 err_name = f"{result[0]}-{result[1]}_err"
                 p_name = f"{result[0]}-{result[1]}_p-value"
                 err_cols.append(err_name)
                 p_cols.append(p_name)
-                self.matrices[matrix_type][err_name] = result[2]
-                self.matrices[matrix_type][p_name] = result[3]
-                self.matrices[matrix_type][f"-log10_{p_name}"] = result[4]
+                new_cols[err_name] = result[2]
+                new_cols[p_name] = result[3]
+                new_cols[f"-log10_{p_name}"] = result[4]
 
-            self.matrices[matrix_type]["RMSE"] = np.sqrt(
-                ((self.matrices[matrix_type][err_cols]) ** 2).mean(axis=1)
+            err_arrays = np.stack([new_cols[c].to_numpy() for c in err_cols], axis=1)
+            new_cols["RMSE"] = pd.Series(
+                np.sqrt(np.mean(err_arrays**2, axis=1)), index=kmer_index
+            )
+            self.matrices[matrix_type] = pd.concat(
+                [self.matrices[matrix_type], pd.DataFrame(new_cols, index=kmer_index)],
+                axis=1,
             )
             self.matrices[matrix_type] = self.matrices[matrix_type].sort_values(
                 "RMSE", ascending=False
             )
-            self.matrices[matrix_type]["group"] = self.matrices[matrix_type].apply(
+            group_series = self.matrices[matrix_type].apply(
                 portek.assign_kmer_group_ava,
                 p_cols=p_cols,
                 avg_cols=self.avg_cols,
@@ -240,14 +267,21 @@ class EnrichedKmersPipeline(BasePipeline):
                 err_cols=err_cols,
                 axis=1,
             )
-            self.matrices[matrix_type]["exclusivity"] = self.matrices[
-                matrix_type
-            ].apply(portek.check_exclusivity, avg_cols=self.avg_cols, axis=1)
+            excl_series = self.matrices[matrix_type].apply(
+                portek.check_exclusivity, avg_cols=self.avg_cols, axis=1
+            )
+            self.matrices[matrix_type] = pd.concat(
+                [
+                    self.matrices[matrix_type],
+                    pd.DataFrame({"group": group_series, "exclusivity": excl_series}),
+                ],
+                axis=1,
+            )
 
         elif self.mode == "ovr":
-            group_pairs = []
             err_cols = []
             p_cols = []
+            group_pairs = []
             for group in self.control_groups:
                 group_pairs.append(
                     (
@@ -256,34 +290,34 @@ class EnrichedKmersPipeline(BasePipeline):
                         group,
                         verbose,
                         false_discovery_control,
+                        mwu_chunk_size,
                     )
                 )
 
-            with multiprocessing.get_context("forkserver").Pool(n_jobs) as pool:
-                try:
-                    results = pool.starmap(
-                        self._compare_group_pair, group_pairs, chunksize=1
-                    )
-                except Exception as e:
-                    print(f"An error occurred during multiprocessing: {e}")
-                    raise
+            results = [self._compare_group_pair(*args) for args in group_pairs]
 
+            new_cols = {}
             for result in results:
                 err_name = f"{result[0]}-{result[1]}_err"
                 p_name = f"{result[0]}-{result[1]}_p-value"
                 err_cols.append(err_name)
                 p_cols.append(p_name)
-                self.matrices[matrix_type][err_name] = result[2]
-                self.matrices[matrix_type][p_name] = result[3]
-                self.matrices[matrix_type][f"-log10_{p_name}"] = result[4]
+                new_cols[err_name] = result[2]
+                new_cols[p_name] = result[3]
+                new_cols[f"-log10_{p_name}"] = result[4]
 
-            self.matrices[matrix_type]["RMSE"] = np.sqrt(
-                ((self.matrices[matrix_type][err_cols]) ** 2).mean(axis=1)
+            err_arrays = np.stack([new_cols[c].to_numpy() for c in err_cols], axis=1)
+            new_cols["RMSE"] = pd.Series(
+                np.sqrt(np.mean(err_arrays**2, axis=1)), index=kmer_index
+            )
+            self.matrices[matrix_type] = pd.concat(
+                [self.matrices[matrix_type], pd.DataFrame(new_cols, index=kmer_index)],
+                axis=1,
             )
             self.matrices[matrix_type] = self.matrices[matrix_type].sort_values(
                 "RMSE", ascending=False
             )
-            self.matrices[matrix_type]["group"] = self.matrices[matrix_type].apply(
+            group_series = self.matrices[matrix_type].apply(
                 portek.assign_kmer_group_ovr,
                 goi=self.goi,
                 p_cols=p_cols,
@@ -291,9 +325,17 @@ class EnrichedKmersPipeline(BasePipeline):
                 freq_cols=self.freq_cols,
                 axis=1,
             )
-            self.matrices[matrix_type]["exclusivity"] = self.matrices[
-                matrix_type
-            ].apply(portek.check_exclusivity, avg_cols=self.avg_cols, axis=1)
+            excl_series = self.matrices[matrix_type].apply(
+                portek.check_exclusivity, avg_cols=self.avg_cols, axis=1
+            )
+            self.matrices[matrix_type] = pd.concat(
+                [
+                    self.matrices[matrix_type],
+                    pd.DataFrame({"group": group_series, "exclusivity": excl_series}),
+                ],
+                axis=1,
+            )
+
         self.enriched_groups = [
             name.split("_")[0]
             for name in self.matrices[matrix_type]["group"].value_counts().index
@@ -464,8 +506,3 @@ class EnrichedKmersPipeline(BasePipeline):
                 + ["RMSE", "group", "exclusivity"]
             )
             df_to_save.loc[:, export_cols].to_csv(out_filename, index_label="kmer")
-
-    # def save_enriched_kmers(self):
-    #     kmers_to_save = self.matrices["enriched"].index.to_list()
-    #     with open(f"{self.project_dir}/temp/enriched_{self.k}mers.pkl", mode="wb") as out_file:
-    #         pickle.dump(kmers_to_save, out_file)
