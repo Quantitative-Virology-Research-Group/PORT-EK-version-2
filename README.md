@@ -1,6 +1,6 @@
 # PORT-EK version 2 (PORT-EK-v2)
 Pathogen Origin Recogition Tool (using) Enriched K-mers
-Version 2.0
+Version 2.3
 
 A tool for identification of genomic variants of virues that arise in different multi-genomes.
 Based on k-mer counting, does not require MSA.
