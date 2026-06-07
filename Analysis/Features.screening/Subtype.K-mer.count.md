@@ -1,4 +1,4 @@
-## Computation of "Subtpye *k*-mer weight"
+## Computation of "Subtpye *k*-mer count"
 
 We aggregated the count of individual *k*-mers across all isolates present in the same group of the HIV-1 subtype; values were then normalized by the total number of enriched *k*-mers present in the same group of the HIV-1 subtype. The “subtype *k*-mer count” is defined by the Equation below.
 
