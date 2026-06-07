@@ -50,7 +50,8 @@ kmer.weight <- function(df) {
   return(df.pool)
 }
 ```
-
+##
+![](PORT-EK-version-2/images/Kmer.weight.png)
 
 
 
