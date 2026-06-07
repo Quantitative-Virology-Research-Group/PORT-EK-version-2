@@ -1,4 +1,4 @@
-## Computation of "Isolate *k*-mer weight"
+## Computation of "Isolate *k*-mer count"
 
 We aggregated *k*-mer counts by HIV-1 isolates present in the same group of HIV-1 subtype. The sum was normalized by the total number of isolates present in the same group of the HIV-1 subtype. The “isolate *k*-mer count” is defined by the Equation below.
 
