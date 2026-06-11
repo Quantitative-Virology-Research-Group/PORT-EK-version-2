@@ -27,13 +27,13 @@ Compute.distance.based.similarity <- function(df.A, df.B, df.C, df.D, df.R) {
   ggplot(mat_melt, aes(x = Subtype_X, y = Subtype_Y, fill = Similarity)) +
   geom_tile(colour = "white", linewidth = 0.8) +
   geom_text(aes(label = round(Similarity, 3)), size = 5, fontface = "bold",
-            colour = ifelse(mat_melt$Similarity > 0.85, "white", "black")) +
+            colour = "black") +
   scale_fill_gradient2(
     low      = "#4575b4",
     mid      = "#fee090",
     high     = "orangered",
-    midpoint = 0.85,
-    limits   = c(0.7, 1),
+    midpoint = 0.75,
+    limits   = c(0, 1),
     name     = "Similarity"
   ) +
   labs(
