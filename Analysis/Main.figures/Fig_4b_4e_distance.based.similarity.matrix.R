@@ -11,7 +11,6 @@ Compute.distance.based.similarity <- function(df.A, df.B, df.C, df.D, df.R) {
   # Build a pairwise correlation matrix between subtypes
   # We treat each subtype's assort.deg value as a single scalar, so we compute
   # the "distance-based" similarity matrix:  corr(i,j) = 1 - |val_i - val_j| / range
-  # Also compute a simple Pearson-style similarity:  corr = 1 - (|diff| / max_diff)
   vals     <- setNames(df$assort.deg, df$subtype)
   subtypes <- df$subtype
   n        <- length(subtypes)
