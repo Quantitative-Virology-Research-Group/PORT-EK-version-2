@@ -1,9 +1,9 @@
 ## Calculation of the Euclidean distance between isolates
 Euclidean distance is chosen based on the consideration that the magnitude (quantity) of the “isolate *k*-mer count” matters. Given that the length of a *k*-mer has been restricted and the network has been resampled to an identical size of 100 isolates for each group of HIV-1 subtypes, their influence is deemed to be negligible. To reduce computing cost, we bootstrapped 100 enriched *k*-mers and repeated 10 times to create 10 subpools of enriched *k*-mers in each group of HIV-1 subtypes. In each subpool of enriched k-mers, an edge weight between two isolates is calculated by the sum of “isolate *k*-mer count” normalized by the total number of isolates in the corresponding group of HIV-1 subtypes. The edge weight is defined by the Equation below.
 
->$$w_{i,i'} = \frac{\Sigma(C_i + C_{i'})}$$
+>$$w_{i,i'} = {\Sigma(C_i + C_{i'})}$$
 
-, where $$w_{i,i'}$$ is the edge weight between isolate $$i$$ and isolate $$i'$$, $${\Sigma(C_i + C_{i'})}$$ is the sum of the *k*-mer counts for isolate $$i$$, and isolate $$i'**, respectively.
+, where $$w_{i,i'}$$ is the edge weight between isolate $$i$$ and isolate $$i'$$, $${\Sigma(C_i + C_{i'})}$$ is the sum of the *k*-mer counts for isolate $$i$$, and isolate $$i'$$, respectively.
 
 The computed edge weight was assigned to individual isolates and was used to compute a matrix of the Euclidean distance, together with the parameter “isolate *k*-mer count” at an individual isolate level using the function dist() with the argument family specified as method = “euclidean” in the R package **stats** (https://www.r-project.org/). The clustering heatmap was visualized using the R package **ComplexHeatmap**.
 
