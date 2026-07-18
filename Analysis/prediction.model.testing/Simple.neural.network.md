@@ -1,3 +1,8 @@
+## Construction of simple neural network-based models
+We performed simple neural network modeling to verify the prediction result obtained from multinomial logistic regression-based models. 1,000 random enriched *k*-mers from each individual pool of enriched *k*-mers were bootstrapped with replacement and divided into a training set (80% of the dataset) and a testing set (20% of the dataset) for the performance of simple neural network running on R. The model was fitted using the function neuralnet() in the R package **neuralnet**. Classifiers associated with the five mentioned features were independently constructed. The whole procedure was repeated 10 times for statistical robustness.
+
+### R code
+```
 Neural.Network.subtype.kmer.average.count <- function(df) {
   # 1. feature selection
   df.subtype <- df %>% dplyr::select(group, kmer.average.count, RMSE, kmer.weight) 
@@ -149,3 +154,4 @@ Neural.Network.sub.subtype.kmer.count <- function(df) {
   
   return(accuracy)
 }
+```
