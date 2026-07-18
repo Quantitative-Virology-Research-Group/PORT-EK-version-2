@@ -102,6 +102,7 @@ portek find_enriched PROJECT_DIR -k K [OPTIONS]
 - `-k K`: K-mer length to analyze (required)
 
 **Options:**
+- `--fdr`: Use false discovery rate correction with Benjamini-Yekutieli procedure
 - `-m, --max_mem GB`: Maximum memory (in GB) for count matrix (default: 2.0)
 - `--n_jobs N`: Number of parallel processes (default: 4)
 - `-v, --verbose`: Print detailed progress information
@@ -207,7 +208,7 @@ ref_seq: reference_genome.fasta
 
 PORTEK generates various output files in `$project_dir/output/`:
 
-- **find_k**: `optimal_k_results.csv` - Statistics for each tested k value
+- **find_k**: `k_selection_results.csv` - Statistics for each tested k value
 - **find_enriched**:
   - `enriched_Kmers_stats.csv` - Statistics for enriched k-mers
   - `Kmer_counts_for_classifier.csv` - K-mer count matrix
