@@ -7,7 +7,7 @@ Based on k-mer counting, does not require MSA.
 Can highlight changes independent of viral philogeny.
 
 Citation\
-**Wiśniewski, J***, K. Serwin, M.Parczewski, A. Kula-Păcurar, P. Skums, A. Kirpich, S. Yakovlev, and H.-C. Chen*. 2026. Identification of different sequence properties between HIV-1 DNA and RNA across subtypes using the k-mer-based approach. BioRxiv DOI:[10.64898/2026.02.25.707904](https://www.biorxiv.org/content/10.64898/2026.02.25.707904v2). (*equal contribution)
+Wiśniewski, J*, K. Serwin, M.Parczewski, A. Kula-Păcurar, P. Skums, A. Kirpich, S. Yakovlev, and H.-C. Chen*. 2026. Identification of different sequence properties between HIV-1 DNA and RNA across subtypes using the k-mer-based approach. BioRxiv DOI:[10.64898/2026.02.25.707904](https://www.biorxiv.org/content/10.64898/2026.02.25.707904v2). (*equal contribution)
 
 ## Installation
 
