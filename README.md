@@ -1,10 +1,10 @@
 # PORT-EK version 2 (PORT-EK-v2)
-Pathogen Origin Recogition Tool (using) Enriched K-mers
+Pathogen Origin Recognition Tool (using) Enriched K-mers
 Version 2.3
 
-A tool for identification of genomic variants of virues that arise in different multi-genomes.
+A tool for identification of genomic variants of viruses that arise in different multi-genomes.
 Based on k-mer counting, does not require MSA.
-Can highlight changes independent of viral philogeny.
+Can highlight changes independent of viral phylogeny.
 
 Citation\
 Wiśniewski, J*, K. Serwin, M.Parczewski, A. Kula-Păcurar, P. Skums, A. Kirpich, S. Yakovlev, and H.-C. Chen*. 2026. Identification of different sequence properties between HIV-1 DNA and RNA across subtypes using the k-mer-based approach. BioRxiv DOI:[10.64898/2026.02.25.707904](https://www.biorxiv.org/content/10.64898/2026.02.25.707904v2). (*equal contribution)
