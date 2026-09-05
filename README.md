@@ -42,17 +42,17 @@ For detailed installation instructions, see [INSTALL.md](INSTALL.md).
 
 4. **Identify enriched k-mers:**
    ```bash
-   portek find_enriched $project_directory -k 15
+   portek find_enriched $project_directory -k 17
    ```
 
 5. **Map k-mers to reference sequence:**
    ```bash
-   portek map $project_directory -k 15
+   portek map $project_directory -k 17
    ```
 
 6. **Construct phylogenetic tree:**
    ```bash
-   portek tree $project_directory -k 15
+   portek tree $project_directory -k 17
    ```
 
 ### Available Commands
