@@ -37,7 +37,7 @@ For detailed installation instructions, see [INSTALL.md](INSTALL.md).
 
 3. **Find optimal k-mer length and get k-mers:**
    ```bash
-   portek find_k $project_directory --max_k 31
+   portek find_k $project_directory --min_k 5 --max_k 31
    ```
 
 4. **Identify enriched k-mers:**
