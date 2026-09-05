@@ -1,1 +1,1 @@
-Folder contains input RNA sequences used in this work. RNA sequences were retrieved from the Los Alamos National Laboratory HIV Databases. The genome ID corresponding to each sequence and sequences that do not pass the quality control are provided in separate Excel files.
+Folder contains input RNA sequences used in this work. RNA sequences were retrieved from the Los Alamos National Laboratory HIV Databases, including subtypes, A, B, C, D, F1, F2, G, H, J, L, CRF01–AE, and CRF02–AG.
