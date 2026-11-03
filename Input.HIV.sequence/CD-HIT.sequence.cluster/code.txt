@@ -1,2 +1,2 @@
-$ cd-hit-est -i DNA_degapped/all_DNA.fasta -o DNA_degapped_clusters.tsv -c 0.98 -n 10 -T 8 -M 0
-$ cd-hit-est -i RNA_degapped/all_RNA.fasta -o RNA_degapped_clusters.tsv -c 0.98 -n 10 -T 8 -M 0
+$ cd-hit-est -i DNA_degapped/all_DNA.fasta -o DNA_degapped_clusters.tsv -c 0.98 -n 10 -d 0 -T 8 -M 0
+$ cd-hit-est -i RNA_degapped/all_RNA.fasta -o RNA_degapped_clusters.tsv -c 0.98 -n 10 -d 0 -T 8 -M 0
