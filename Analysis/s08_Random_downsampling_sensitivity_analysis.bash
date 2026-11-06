@@ -37,16 +37,6 @@ CRF01.AE   9191  0.500  0.376
 CRF02.AG   5129  0.666  0.540
 D          4711  0.776  0.671
 Rare       3360  0.822  0.663
-
-Share of replicate markers also enriched for the SAME group in the full-data run (mean over replicates):
- A           0.0
-B           0.0
-C           0.0
-D           0.0
-Rare        0.0
-CRF01.AE    0.0
-CRF02.AG    0.0
-dtype: float64
 ---
 
 # RNA
@@ -87,14 +77,4 @@ CRF01.AE   8329  0.640  0.517
 CRF02.AG   3350  0.726  0.623
 D          6050  0.858  0.783
 Rare       3928  0.880  0.804
-
-Share of replicate markers also enriched for the SAME group in the full-data run (mean over replicates):
- A           0.0
-B           0.0
-C           0.0
-D           0.0
-Rare        0.0
-CRF01.AE    0.0
-CRF02.AG    0.0
-dtype: float64
 ---
