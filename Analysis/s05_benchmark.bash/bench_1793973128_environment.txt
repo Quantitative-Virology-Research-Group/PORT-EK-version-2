@@ -1,0 +1,9 @@
+# Fri Nov  6 02:52:08 PM CET 2026
+CPU(s):                                  24
+Model name:                              12th Gen Intel(R) Core(TM) i9-12900K
+CPU(s) scaling MHz:                      54%
+               total        used        free      shared  buff/cache   available
+Mem:             125          62           0           2          61          63
+Python 3.13.13
+jellyfish 2.3.1
+scripts/s05_benchmark.sh: line 14: kmc: command not found
