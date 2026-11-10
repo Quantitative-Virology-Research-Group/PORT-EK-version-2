@@ -41,3 +41,8 @@ D          0.068         0.126
 R          0.111         0.130
 CRF01.AE   0.062         0.129
 CRF02.AG   0.085         0.127
+
+$ python scripts/s09_diversity_vs_enrichment.py -k 15 --dna project_rebuttal --rna project_rebuttal_RNA --out FigS_diversity
+molecule  n_groups  spearman_rho  exact_permutation_p
+     DNA         7       -0.5714               0.2000
+     RNA         7       -0.8929               0.0123
