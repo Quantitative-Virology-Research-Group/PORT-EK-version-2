@@ -17,7 +17,7 @@ raw table: bench_1793973122.tsv
 ## KMC 3
 /usr/bin/time -f "%M" -o peal_mem.rna.4.txt /home/labadmin/Documents/Software/kmc/bin/kmc -k15 -fm -ci1 -t4 ../all_DNA.fasta Rebuttal_dna .
 
-###=========================================####
+####=========================================####
 
 # RNA
 $ bash scripts/s05_benchmark.sh data/RNA_degapped/all_RNA.fasta 15 8 5 project_rebuttal_RNA_copy_s05
