@@ -15,7 +15,7 @@ raw table: bench_1793973122.tsv
 /usr/bin/time -v /home/labadmin/Documents/Software/kmer-db/bin/kmer-db build -t 12 -k 15 ../all_DNA.fasta output.dna.db
 
 ## KMC 3
-/usr/bin/time -f "%M" -o peal_mem.rna.4.txt /home/labadmin/Documents/Software/kmc/bin/kmc -k15 -fm -ci1 -t4 ../all_DNA.fasta Rebuttal_dna .
+/usr/bin/time -f "%M" -o peal_mem.dna.txt /home/labadmin/Documents/Software/kmc/bin/kmc -k15 -fm -ci1 -t4 ../all_DNA.fasta Rebuttal_dna .
 
 ####=========================================####
 
