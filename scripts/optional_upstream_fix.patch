@@ -1,0 +1,79 @@
+diff -ru -x __pycache__ portek2/portek/portek_enriched.py portek2_fixed/portek/portek_enriched.py
+--- portek2/portek/portek_enriched.py	2026-10-30 06:22:11.895550081 +0000
++++ portek2_fixed/portek/portek_enriched.py	2026-10-30 11:42:50.881231666 +0000
+@@ -238,11 +238,13 @@
+             results = [self._compare_group_pair(*args) for args in group_pairs]
+ 
+             new_cols = {}
++            pair_of = {}
+             for result in results:
+                 err_name = f"{result[0]}-{result[1]}_err"
+                 p_name = f"{result[0]}-{result[1]}_p-value"
+                 err_cols.append(err_name)
+                 p_cols.append(p_name)
++                pair_of[p_name] = (result[0], result[1])
+                 new_cols[err_name] = result[2]
+                 new_cols[p_name] = result[3]
+                 new_cols[f"-log10_{p_name}"] = result[4]
+@@ -264,6 +266,7 @@
+                 avg_cols=self.avg_cols,
+                 freq_cols=self.freq_cols,
+                 err_cols=err_cols,
++                pair_of=pair_of,
+                 axis=1,
+             )
+             excl_series = self.matrices[matrix_type].apply(
+diff -ru -x __pycache__ portek2/portek/portek_findk.py portek2_fixed/portek/portek_findk.py
+--- portek2/portek/portek_findk.py	2026-10-30 06:22:11.895550081 +0000
++++ portek2_fixed/portek/portek_findk.py	2026-10-30 12:17:52.581412481 +0000
+@@ -149,8 +149,13 @@
+         for time in times:
+             time_dict[time[0]] += time[1]
+ 
++        # FIX: count only unambiguous nucleotides (ACGT); len(seq) also counts alignment gaps ("-")
+         avg_seq_len = np.mean(
+-            [len(seq) for seq_list in self.seq_lists for seq in seq_list]
++            [
++                sum(1 for c in str(seq.seq) if c in "ACGT")
++                for seq_list in self.seq_lists
++                for seq in seq_list
++            ]
+         )
+         if verbose == True:
+             print(f"Average sequence length: {avg_seq_len}")
+@@ -294,13 +299,9 @@
+         y_n = (y - y.min()) / (y.max() - y.min()) if y.max() != y.min() else y
+ 
+         dx, dy = x_n[-1] - x_n[0], y_n[-1] - y_n[0]
++        # FIX: standard point-to-chord distance (the original repeated two terms)
+         distances = np.abs(
+-            dy * x_n
+-            - dx * y_n
+-            + x_n[-1] * y_n[0]
+-            - dx * y_n
+-            + x_n[-1] * y_n[0]
+-            - x_n[0] * y_n[-1]
++            dy * x_n - dx * y_n + x_n[-1] * y_n[0] - x_n[0] * y_n[-1]
+         ) / np.sqrt(dx**2 + dy**2)
+ 
+         return distances
+diff -ru -x __pycache__ portek2/portek/portek_utils.py portek2_fixed/portek/portek_utils.py
+--- portek2/portek/portek_utils.py	2026-10-30 06:22:11.895550081 +0000
++++ portek2_fixed/portek/portek_utils.py	2026-10-30 11:42:50.880981703 +0000
+@@ -174,11 +174,13 @@
+ 
+ 
+ def assign_kmer_group_ava(
+-    row: pd.Series, p_cols: list, avg_cols: list, freq_cols: list, err_cols: list
++    row: pd.Series, p_cols: list, avg_cols: list, freq_cols: list, err_cols: list,
++    pair_of: dict = None,
+ ):
+     max_group = row[avg_cols].idxmax()
+-    max_group = max_group.split("_")[0]
+-    rel_p_cols = [col for col in p_cols if max_group in col]
++    max_group = max_group[: -len("_avg")]  # exact group name (robust to "_" in names)
++    # FIX: exact membership instead of substring match (e.g. "A" in "CRF01-AE")
++    rel_p_cols = [col for col in p_cols if max_group in pair_of[col]]
+     if all(row[freq_cols] > 0.9) and all((abs(row[err_cols]) < 0.1)):
+         return "conserved"
+     elif all(row[rel_p_cols] < 0.01):
